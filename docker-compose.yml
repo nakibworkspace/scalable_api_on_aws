@@ -6,12 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=pass
-      - POSTGRES_DB=appdb
-      - POSTGRES_HOST=postgres
-    depends_on:
-      - postgres
+      - DATABASE_URL=postgresql://postgres:postgres@100.84.171.106:5432/postgres
     networks:
       - app-network
     healthcheck:
@@ -19,24 +14,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-  postgres:
-    image: postgres:15
-    environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=pass
-      - POSTGRES_DB=appdb
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      start_period: 40s
 
   prometheus:
     image: prom/prometheus:latest
@@ -50,13 +28,11 @@ services:
       - '--storage.tsdb.path=/prometheus'
     networks:
       - app-network
-    depends_on:
-      - fastapi
 
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
@@ -73,6 +49,5 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
   prometheus_data:
   grafana_data:

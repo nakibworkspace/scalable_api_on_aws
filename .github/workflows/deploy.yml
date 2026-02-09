@@ -6,10 +6,10 @@ on:
     types:
       - completed
     branches: [main]
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: ap-southeast-1
   ECR_REPOSITORY: fastapi-app-repo
 
 jobs:
@@ -38,14 +38,10 @@ jobs:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Build Docker image
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
-        
-        # Push to ECR
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-        
         echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
     
     - name: Set up Python
@@ -65,52 +61,28 @@ jobs:
       uses: pulumi/actions@v4
       with:
         command: up
-        stack-name: production
+        stack-name: dev
         work-dir: infra
       env:
         PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-    
-    - name: Get RDS endpoint from Pulumi
-      id: get-rds
-      run: |
-        cd infra
-        DATABASE_URL=$(pulumi stack output database_url --show-secrets)
-        echo "::add-mask::$DATABASE_URL"
-        echo "DATABASE_URL=$DATABASE_URL" >> $GITHUB_ENV
     
     - name: Run database migrations
       run: |
         pip install alembic psycopg2-binary
         alembic upgrade head
       env:
-        DATABASE_URL: ${{ env.DATABASE_URL }}
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
     
     - name: Force ECS service update
       run: |
-        CLUSTER_NAME=$(cd infra && pulumi stack output cluster_name)
-        SERVICE_NAME="fastapi-app-service"
-        
         aws ecs update-service \
-          --cluster $CLUSTER_NAME \
-          --service $SERVICE_NAME \
+          --cluster fastapi-app-cluster \
+          --service fastapi-app-service \
           --force-new-deployment \
           --region ${{ env.AWS_REGION }}
     
-    - name: Wait for service stability
-      run: |
-        CLUSTER_NAME=$(cd infra && pulumi stack output cluster_name)
-        SERVICE_NAME="fastapi-app-service"
-        
-        aws ecs wait services-stable \
-          --cluster $CLUSTER_NAME \
-          --services $SERVICE_NAME \
-          --region ${{ env.AWS_REGION }}
-    
-    - name: Get deployment URLs
+    - name: Get deployment URL
       run: |
         cd infra
         echo "Deployment Complete!"
         echo "Application URL: $(pulumi stack output app_url)"
-        echo "Prometheus URL: $(pulumi stack output prometheus_url)"
-        echo "Grafana URL: $(pulumi stack output grafana_url)"
-        echo "RDS Endpoint: $(pulumi stack output rds_endpoint)"
