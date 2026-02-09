@@ -1,0 +1,3 @@
+name: fastapi-infra
+runtime: python
+description: FastAPI infrastructure on AWS with Pulumi
