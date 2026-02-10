@@ -1,5 +1,5 @@
 name: fastapi-app
-description: FastAPI application infrastructure on AWS EKS
+description: FastAPI application infrastructure on AWS EC2
 runtime:
   name: python
   options:
@@ -9,5 +9,5 @@ config:
   pulumi:tags:
     value:
       pulumi:template: aws-python
-      project: fastapi-eks
+      project: fastapi-ec2
 

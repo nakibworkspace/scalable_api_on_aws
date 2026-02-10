@@ -131,20 +131,25 @@ docker run -p 8000:8000 fastapi-app
 curl http://localhost:8000/model/info
 ```
 
-## Kubernetes Deployment
+## EC2 Deployment
 
 The model is included in the container image and loaded on startup:
 
 ```bash
-# Deploy to EKS
-kubectl apply -f k8s/deployment.yaml
+# Deploy to EC2 (via Pulumi)
+cd infra
+pulumi up
+
+# Get EC2 public IP
+EC2_IP=$(pulumi stack output instance_public_ip)
 
 # Check if model is loaded
-kubectl logs -l app=fastapi | grep "ML model"
+curl http://$EC2_IP/model/info
 
-# Test via Load Balancer
-LB_URL=$(kubectl get service fastapi-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-curl http://$LB_URL/model/info
+# Test prediction
+curl -X POST http://$EC2_IP/predict \
+  -H "Content-Type: application/json" \
+  -d '{"text": "This product is amazing!"}'
 ```
 
 ## Model Performance

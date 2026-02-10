@@ -72,7 +72,7 @@ def startup():
     
     # Load ML model
     global ml_model
-    model_path = Path("models/sentiment_model.joblib")
+    model_path = Path("app/models/sentiment_model.joblib")
     if model_path.exists():
         ml_model = joblib.load(model_path)
         print(f"✓ ML model loaded from {model_path}")
@@ -84,7 +84,7 @@ def startup():
 def read_root():
     return {
         "status": "online",
-        "service": "FastAPI on AWS EKS",
+        "service": "FastAPI on AWS EC2",
         "version": "1.0.0",
         "ml_model_loaded": ml_model is not None
     }
