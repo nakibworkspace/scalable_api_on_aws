@@ -7,8 +7,8 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 from pydantic import BaseModel
 import os
-
-app=FastAPI()
+import joblib
+from pathlib import Path
 
 # Database setup - use DATABASE_URL if provided, otherwise build from components
 DATABASE_URL = os.getenv('DATABASE_URL') or f"postgresql://{os.getenv('POSTGRES_USER', 'user')}:{os.getenv('POSTGRES_PASSWORD', 'pass')}@{os.getenv('POSTGRES_HOST', 'localhost')}:5432/{os.getenv('POSTGRES_DB', 'appdb')}"
@@ -39,8 +39,20 @@ class ItemResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# ML Model schemas
+class PredictionRequest(BaseModel):
+    text: str
+
+class PredictionResponse(BaseModel):
+    text: str
+    sentiment: str
+    confidence: float
+
 # FastAPI app
 app = FastAPI(title="Scalable FastAPI on AWS", version="1.0.0")
+
+# Global variable for ML model
+ml_model = None
 
 # Middleware
 app.add_middleware(
@@ -53,17 +65,28 @@ app.add_middleware(
 app.add_middleware(PrometheusMiddleware)
 app.add_route("/metrics", handle_metrics)
 
-# Create tables
+# Create tables and load ML model
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
+    
+    # Load ML model
+    global ml_model
+    model_path = Path("models/sentiment_model.joblib")
+    if model_path.exists():
+        ml_model = joblib.load(model_path)
+        print(f"✓ ML model loaded from {model_path}")
+    else:
+        print(f"⚠ Warning: ML model not found at {model_path}")
+        print("  Run 'python train_model.py' to create the model")
 
 @app.get("/")
 def read_root():
     return {
         "status": "online",
-        "service": "FastAPI on AWS ECS",
-        "version": "1.0.0"
+        "service": "FastAPI on AWS EKS",
+        "version": "1.0.0",
+        "ml_model_loaded": ml_model is not None
     }
 
 @app.get("/health")
@@ -72,7 +95,11 @@ def health_check():
         db = SessionLocal()
         db.execute("SELECT 1")
         db.close()
-        return {"status": "healthy", "database": "connected"}
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "ml_model": "loaded" if ml_model else "not loaded"
+        }
     except Exception as e:
         return {"status": "unhealthy", "database": "disconnected", "error": str(e)}
 
@@ -107,3 +134,45 @@ def get_item(item_id: int):
         return item
     finally:
         db.close()
+
+# ML Model endpoints
+@app.post("/predict", response_model=PredictionResponse)
+def predict_sentiment(request: PredictionRequest):
+    """Predict sentiment of input text using ML model"""
+    if ml_model is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ML model not loaded. Please train the model first."
+        )
+    
+    try:
+        # Get prediction
+        prediction = ml_model.predict([request.text])[0]
+        probabilities = ml_model.predict_proba([request.text])[0]
+        confidence = float(max(probabilities))
+        
+        sentiment = "positive" if prediction == 1 else "negative"
+        
+        return PredictionResponse(
+            text=request.text,
+            sentiment=sentiment,
+            confidence=confidence
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+
+@app.get("/model/info")
+def model_info():
+    """Get information about the loaded ML model"""
+    if ml_model is None:
+        return {
+            "loaded": False,
+            "message": "No model loaded. Run 'python train_model.py' to create one."
+        }
+    
+    return {
+        "loaded": True,
+        "model_type": "Sentiment Classifier",
+        "algorithm": "Logistic Regression with TF-IDF",
+        "classes": ["negative", "positive"]
+    }

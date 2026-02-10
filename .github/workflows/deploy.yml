@@ -1,4 +1,4 @@
-name: Deploy to AWS ECS
+name: Deploy to AWS EKS
 
 on:
   workflow_run:
@@ -66,6 +66,12 @@ jobs:
       env:
         PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
     
+    - name: Configure kubectl
+      run: |
+        cd infra
+        pulumi stack output kubeconfig > kubeconfig.yaml
+        echo "KUBECONFIG=$PWD/kubeconfig.yaml" >> $GITHUB_ENV
+    
     - name: Run database migrations
       run: |
         pip install alembic psycopg2-binary
@@ -73,16 +79,27 @@ jobs:
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
     
-    - name: Force ECS service update
+    - name: Update Kubernetes deployment
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
       run: |
-        aws ecs update-service \
-          --cluster fastapi-app-cluster \
-          --service fastapi-app-service \
-          --force-new-deployment \
-          --region ${{ env.AWS_REGION }}
+        # Update deployment manifest with ECR URL
+        sed -i "s|<ECR_REPOSITORY_URL>|$ECR_REGISTRY/$ECR_REPOSITORY|g" k8s/deployment.yaml
+        
+        # Apply Kubernetes manifests
+        kubectl apply -f k8s/deployment.yaml
+        kubectl apply -f k8s/service.yaml
+        
+        # Restart deployment to pull new image
+        kubectl rollout restart deployment fastapi-deployment
+        
+        # Wait for rollout to complete
+        kubectl rollout status deployment fastapi-deployment
     
     - name: Get deployment URL
       run: |
-        cd infra
-        echo "Deployment Complete!"
-        echo "Application URL: $(pulumi stack output app_url)"
+        echo "🚀 Deployment Complete!"
+        echo "Getting Load Balancer URL..."
+        kubectl get service fastapi-service
+        echo ""
+        echo "Application will be available at the EXTERNAL-IP shown above (may take a few minutes to provision)"

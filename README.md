@@ -1,294 +1,413 @@
-# Scalable FastAPI on AWS - Hands-On Lab
+# Scalable FastAPI on AWS - Complete Hands-On Lab
 
-A production-ready FastAPI application deployed on AWS ECS with PostgreSQL, Prometheus, and Grafana running in Docker containers. Infrastructure managed with Pulumi and CI/CD via GitHub Actions.
+A production-ready, scalable FastAPI application deployed on AWS using modern DevOps practices. This project demonstrates Infrastructure as Code (Pulumi), containerization (Docker/ECS), CI/CD (GitHub Actions), monitoring (Prometheus/Grafana), and managed databases (RDS).
 
-## Architecture
+## 🏗️ Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     AWS Cloud                                │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │              Application Load Balancer                │  │
-│  │  (Routes: /, /prometheus*, /grafana*)                │  │
-│  └────────────────┬─────────────────────────────────────┘  │
-│                   │                                          │
-│  ┌────────────────▼─────────────────────────────────────┐  │
-│  │           ECS Fargate Task                           │  │
-│  │                                                       │  │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐          │  │
-│  │  │ FastAPI  │  │Prometheus│  │ Grafana  │          │  │
-│  │  │  :8000   │  │  :9090   │  │  :3000   │          │  │
-│  │  └──────────┘  └──────────┘  └──────────┘          │  │
-│  │       │              │              │                │  │
-│  │  ┌────▼──────────────▼──────────────▼────┐         │  │
-│  │  │         PostgreSQL :5432               │         │  │
-│  │  └────────────────────────────────────────┘         │  │
-│  │                                                       │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                          │                                   │
-│  ┌───────────────────────▼───────────────────────────────┐  │
-│  │  EFS (Persistent Storage for DB, Metrics, Dashboards) │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+│                      GitHub Actions CI/CD                    │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │   Lint   │→ │   Test   │→ │  Build   │→ │  Deploy  │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+              ┌──────────────────────┐
+              │   AWS ECR Registry   │
+              │  (Docker Images)     │
+              └──────────┬───────────┘
+                         │
+                         ▼
+              ┌──────────────────────┐
+              │  Application Load    │
+              │     Balancer (ALB)   │
+              │   - HTTP/HTTPS       │
+              │   - Path routing     │
+              └──────────┬───────────┘
+                         │
+         ┌───────────────┼───────────────┐
+         │               │               │
+         ▼               ▼               ▼
+    ┌────────┐    ┌────────────┐   ┌─────────┐
+    │FastAPI │    │ Prometheus │   │ Grafana │
+    │  ECS   │    │    ECS     │   │   ECS   │
+    │Fargate │    │  Fargate   │   │ Fargate │
+    └───┬────┘    └─────┬──────┘   └────┬────┘
+        │               │               │
+        │               └───────┬───────┘
+        │                       │
+        ▼                       ▼
+   ┌─────────┐            ┌─────────┐
+   │   RDS   │            │   EFS   │
+   │Postgres │            │ Storage │
+   │ (15.4)  │            │         │
+   └─────────┘            └─────────┘
 ```
 
-## Features
+## ✨ Features
 
-- **FastAPI**: Modern Python web framework with automatic API documentation
-- **PostgreSQL**: Relational database with persistent EFS storage
-- **Prometheus**: Metrics collection and monitoring
-- **Grafana**: Metrics visualization and dashboards
-- **AWS ECS Fargate**: Serverless container orchestration
-- **Pulumi**: Infrastructure as Code for AWS resources
-- **GitHub Actions**: Automated CI/CD pipeline
-- **Database Migrations**: Alembic for schema management
+### Infrastructure
+- ✅ **AWS ECS Fargate**: Serverless container orchestration
+- ✅ **AWS ECR**: Private Docker registry
+- ✅ **AWS RDS PostgreSQL**: Managed database with automated backups
+- ✅ **AWS ALB**: Application load balancer with path-based routing
+- ✅ **AWS EFS**: Persistent storage for monitoring data
+- ✅ **VPC**: Private/public subnets with NAT gateway
+- ✅ **Security Groups**: Properly configured network isolation
+- ✅ **IAM Roles**: Least privilege access control
 
-## Quick Start
+### Application
+- ✅ **FastAPI**: Modern, fast Python web framework
+- ✅ **SQLAlchemy**: Database ORM
+- ✅ **Alembic**: Database migrations
+- ✅ **Pydantic**: Data validation
+- ✅ **Async/Await**: Asynchronous request handling
+
+### Monitoring & Observability
+- ✅ **Prometheus**: Metrics collection and alerting
+- ✅ **Grafana**: Visualization and dashboards
+- ✅ **CloudWatch Logs**: Centralized logging
+- ✅ **Health Checks**: Application and infrastructure monitoring
+
+### CI/CD
+- ✅ **GitHub Actions**: Automated testing and deployment
+- ✅ **Linting**: Code quality with Ruff
+- ✅ **Type Checking**: Static analysis with MyPy
+- ✅ **Unit Tests**: Pytest with coverage
+- ✅ **E2E Tests**: End-to-end testing
+- ✅ **Security Scanning**: Bandit for security issues
+
+### DevOps
+- ✅ **Pulumi**: Infrastructure as Code (Python)
+- ✅ **Docker**: Containerization
+- ✅ **Docker Compose**: Local development
+- ✅ **Multi-stage Builds**: Optimized images
+- ✅ **Blue/Green Deployments**: Zero-downtime updates
+
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- Docker and Docker Compose
 - Python 3.11+
-- AWS CLI configured
-- Pulumi CLI installed
-- GitHub account
+- Docker & Docker Compose
+- AWS Account
+- Pulumi Account (free tier)
+- GitHub Account
 
 ### Local Development
 
-1. **Clone and setup**:
 ```bash
-git clone <your-repo>
-cd <your-repo>
+# Clone repository
+git clone <your-repo-url>
+cd <repo-name>
+
+# Start all services
+docker-compose up -d
+
+# Access services
+open http://localhost:8000/docs      # FastAPI
+open http://localhost:9090           # Prometheus
+open http://localhost:3000           # Grafana (admin/admin)
+
+# Run tests
+pytest
+
+# Stop services
+docker-compose down
 ```
 
-2. **Start all services**:
-```bash
-docker-compose up --build
-```
-
-3. **Access services**:
-- FastAPI: http://localhost:8000
-- API Docs: http://localhost:8000/docs
-- Prometheus: http://localhost:9090
-- Grafana: http://localhost:3000 (admin/admin)
-
-4. **Test the API**:
-```bash
-# Health check
-curl http://localhost:8000/health
-
-# Create an item
-curl -X POST http://localhost:8000/items \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Test Item","description":"My first item"}'
-
-# List items
-curl http://localhost:8000/items
-
-# View metrics
-curl http://localhost:8000/metrics
-```
-
-## Part 1: Initial Setup & Deployment
-
-### Step 1: Configure AWS Infrastructure
+### Deploy to AWS
 
 ```bash
+# Install Pulumi
+brew install pulumi/tap/pulumi  # macOS
+# or visit: https://www.pulumi.com/docs/install/
+
+# Configure Pulumi
 cd infra
 pulumi login
-pulumi stack init dev
+pulumi stack init production
 pulumi config set aws:region us-east-1
-pulumi config set --secret db-password YourSecurePassword123
-```
+pulumi config set --secret db-password YourSecurePassword123!
 
-### Step 2: Deploy to AWS
-
-```bash
+# Deploy infrastructure
 pulumi up
+
+# Note the outputs:
+# - app_url: Your application URL
+# - ecr_repository_url: Docker registry
+# - rds_endpoint: Database endpoint
 ```
 
-This creates:
-- VPC with public/private subnets
-- ECS Cluster and Fargate service
-- Application Load Balancer
-- ECR repository
-- EFS for persistent storage
-- Security groups and IAM roles
+### Configure CI/CD
 
-### Step 3: Build and Push Docker Image
+1. Go to GitHub repository → Settings → Secrets
+2. Add secrets:
+   - `AWS_ACCESS_KEY_ID`
+   - `AWS_SECRET_ACCESS_KEY`
+   - `PULUMI_ACCESS_TOKEN`
+3. Push to main branch to trigger deployment
 
 ```bash
-# Get ECR login
-aws ecr get-login-password --region us-east-1 | \
-  docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
-
-# Build and push
-docker build -t fastapi-app .
-docker tag fastapi-app:latest $(pulumi stack output ecr_repository_url):latest
-docker push $(pulumi stack output ecr_repository_url):latest
+git add .
+git commit -m "feat: initial deployment"
+git push origin main
 ```
 
-### Step 4: Setup GitHub Actions
+## 📚 Documentation
 
-Add these secrets to your GitHub repository:
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `PULUMI_ACCESS_TOKEN`
-- `DB_PASSWORD`
+- **[LAB_GUIDE.md](LAB_GUIDE.md)**: Complete step-by-step lab exercises
+- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)**: Command reference and troubleshooting
+- **[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)**: Detailed deployment instructions
+- **[SETUP_GUIDE.md](SETUP_GUIDE.md)**: Initial setup and configuration
+- **[LAB_EXERCISES.md](LAB_EXERCISES.md)**: Hands-on exercises
 
-The CI/CD pipeline will:
-1. Run tests and linting
-2. Build Docker image
-3. Push to ECR
-4. Run database migrations
-5. Deploy to ECS
+## 🎯 Learning Objectives
 
-## Part 2: Advanced Features
+### Part 1: Foundation
+- Structure FastAPI applications for production
+- Configure CI/CD pipelines with GitHub Actions
+- Manage AWS infrastructure with Pulumi (IaC)
+- Build and push Docker images to ECR
+- Deploy containerized apps to ECS Fargate
+- Set up monitoring with Prometheus and Grafana
 
-### Database Migrations
+### Part 2: Advanced
+- Manage RDS PostgreSQL databases
+- Handle database migrations in CI/CD
+- Implement end-to-end testing
+- Configure auto-scaling
+- Set up SSL/TLS with ACM
+- Implement blue/green deployments
+- Monitor with CloudWatch
 
-```bash
-# Create a new migration
-alembic revision --autogenerate -m "Add new table"
+## 🛠️ Technology Stack
 
-# Apply migrations
-alembic upgrade head
+| Category | Technology |
+|----------|-----------|
+| **Language** | Python 3.11 |
+| **Framework** | FastAPI |
+| **Database** | PostgreSQL 15 (RDS) |
+| **ORM** | SQLAlchemy |
+| **Migrations** | Alembic |
+| **Container** | Docker |
+| **Orchestration** | AWS ECS Fargate |
+| **Registry** | AWS ECR |
+| **Load Balancer** | AWS ALB |
+| **Storage** | AWS EFS |
+| **IaC** | Pulumi (Python) |
+| **CI/CD** | GitHub Actions |
+| **Monitoring** | Prometheus + Grafana |
+| **Logging** | CloudWatch Logs |
+| **Testing** | Pytest |
 
-# Rollback
-alembic downgrade -1
-```
-
-### Monitoring Setup
-
-1. **Prometheus** scrapes metrics from FastAPI at `/metrics`
-2. **Grafana** visualizes metrics from Prometheus
-3. Access Grafana at `http://<alb-url>/grafana`
-
-### Feature Flags (Optional)
-
-Add Unleash for gradual feature rollouts:
-```python
-from unleash import UnleashClient
-
-client = UnleashClient(
-    url="<unleash-url>",
-    app_name="fastapi-app",
-)
-
-if client.is_enabled("new_feature"):
-    # New feature code
-    pass
-```
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 .
-├── app/
-│   ├── main.py              # FastAPI application
-│   ├── config.py            # Configuration
-│   ├── database.py          # Database setup
-│   ├── test_main.py         # Unit tests
-│   └── requirements.txt     # Python dependencies
-├── infra/
-│   ├── __main__.py          # Pulumi infrastructure code
-│   ├── Pulumi.yaml          # Pulumi project config
-│   └── requirements.txt     # Pulumi dependencies
-├── migrations/
-│   ├── env.py               # Alembic environment
-│   └── script.py.mako       # Migration template
-├── monitoring/
-│   ├── prometheus.yml       # Prometheus config
-│   ├── grafana-datasource.yml
-│   └── grafana-dashboard.json
-├── .github/
-│   └── workflows/
-│       ├── ci.yml           # CI pipeline
-│       ├── deploy.yml       # Deployment pipeline
-│       └── e2e-tests.yml    # E2E tests
-├── docker-compose.yml       # Local development
-├── Dockerfile               # Container image
-└── README.md
+├── app/                          # FastAPI application
+│   ├── main.py                   # Application entry point
+│   ├── config.py                 # Configuration management
+│   ├── database.py               # Database connection
+│   ├── models.py                 # SQLAlchemy models
+│   ├── schemas.py                # Pydantic schemas
+│   ├── crud.py                   # Database operations
+│   └── requirements.txt          # Python dependencies
+│
+├── infra/                        # Pulumi infrastructure
+│   ├── __main__.py               # Infrastructure definition
+│   │   ├── VPC & Networking      # Private/public subnets
+│   │   ├── Security Groups       # Network isolation
+│   │   ├── RDS PostgreSQL        # Managed database
+│   │   ├── ECS Cluster           # Container orchestration
+│   │   ├── ECR Repository        # Docker registry
+│   │   ├── EFS                   # Persistent storage
+│   │   ├── ALB                   # Load balancer
+│   │   └── IAM Roles             # Access control
+│   └── requirements.txt          # Pulumi dependencies
+│
+├── .github/workflows/            # CI/CD pipelines
+│   ├── ci.yml                    # Test & quality checks
+│   ├── deploy.yml                # AWS deployment
+│   └── e2e-tests.yml             # End-to-end tests
+│
+├── migrations/                   # Database migrations
+│   ├── env.py                    # Alembic environment
+│   └── versions/                 # Migration scripts
+│
+├── monitoring/                   # Monitoring configuration
+│   ├── prometheus.yml            # Prometheus config
+│   ├── grafana-dashboard.json    # Grafana dashboard
+│   └── grafana-datasource.yml    # Grafana datasource
+│
+├── tests/                        # Test suite
+│   ├── unit/                     # Unit tests
+│   ├── integration/              # Integration tests
+│   └── e2e/                      # End-to-end tests
+│
+├── Dockerfile                    # Multi-stage Docker build
+├── docker-compose.yml            # Local development
+├── alembic.ini                   # Migration configuration
+├── pytest.ini                    # Test configuration
+└── .env.example                  # Environment template
 ```
 
-## API Endpoints
+## 🔧 Common Commands
 
-- `GET /` - Root endpoint
-- `GET /health` - Health check
-- `GET /metrics` - Prometheus metrics
-- `GET /docs` - API documentation (Swagger UI)
-- `POST /items` - Create item
-- `GET /items` - List items
-- `GET /items/{id}` - Get item by ID
+```bash
+# Local Development
+docker-compose up -d              # Start services
+docker-compose logs -f fastapi    # View logs
+pytest --cov=app                  # Run tests with coverage
 
-## Monitoring
+# Database Migrations
+alembic revision --autogenerate -m "description"
+alembic upgrade head
+alembic downgrade -1
 
-### Prometheus Queries
+# Infrastructure
+cd infra
+pulumi preview                    # Preview changes
+pulumi up                         # Deploy
+pulumi destroy                    # Tear down
+pulumi stack output               # View outputs
 
-```promql
-# Request rate
-rate(http_requests_total[5m])
-
-# Response time
-http_request_duration_seconds
-
-# Error rate
-rate(http_requests_total{status=~"5.."}[5m])
+# AWS Operations
+aws ecs list-tasks --cluster fastapi-app-cluster
+aws logs tail /aws/ecs/fastapi-app-logs --follow
+aws ecs update-service --cluster fastapi-app-cluster \
+  --service fastapi-app-service --force-new-deployment
 ```
+
+## 🔐 Security Best Practices
+
+- ✅ RDS in private subnets only
+- ✅ Security groups with minimal access
+- ✅ Secrets encrypted with Pulumi config
+- ✅ IAM roles with least privilege
+- ✅ SSL/TLS for all external traffic
+- ✅ RDS and EFS encryption enabled
+- ✅ Regular security scanning in CI/CD
+- ✅ No hardcoded credentials
+
+## 💰 Cost Estimation
+
+### Free Tier (First 12 months)
+- RDS db.t3.micro: 750 hours/month
+- ECS Fargate: 20GB storage, 10GB transfer
+- ECR: 500MB storage
+- ALB: 750 hours/month (first year)
+
+### Estimated Monthly Cost (After Free Tier)
+- RDS db.t3.micro: ~$15
+- ECS Fargate (1 task): ~$15
+- ALB: ~$20
+- EFS: ~$3
+- **Total: ~$53/month**
+
+### Cost Optimization Tips
+```bash
+# Stop services when not in use
+aws ecs update-service --desired-count 0
+aws rds stop-db-instance --db-instance-identifier fastapi-app-postgres
+
+# Use Spot instances for non-production
+# Enable auto-scaling to match demand
+# Clean up old ECR images
+```
+
+## 🐛 Troubleshooting
+
+### ECS Task Won't Start
+```bash
+# Check logs
+aws logs tail /aws/ecs/fastapi-app-logs --follow
+
+# Describe task
+aws ecs describe-tasks --cluster fastapi-app-cluster --tasks <task-id>
+```
+
+### Database Connection Issues
+```bash
+# Verify security groups
+aws ec2 describe-security-groups --group-ids <sg-id>
+
+# Test connection
+psql postgresql://user:pass@<rds-endpoint>:5432/dbname
+```
+
+### Load Balancer Health Checks Failing
+```bash
+# Check target health
+aws elbv2 describe-target-health --target-group-arn <arn>
+
+# Verify health endpoint
+curl http://<alb-url>/health
+```
+
+## 📊 Monitoring
+
+### Prometheus Metrics
+- `http_requests_total`: Total HTTP requests
+- `http_request_duration_seconds`: Request latency
+- `up`: Service availability
 
 ### Grafana Dashboards
+- Request rate and error rate
+- Latency percentiles (p50, p95, p99)
+- Database connection pool
+- ECS task metrics
 
-Import the provided dashboard from `monitoring/grafana-dashboard.json`
+### CloudWatch Alarms
+- ECS CPU/Memory utilization
+- RDS connections and storage
+- ALB target health
+- Application errors
 
-## Troubleshooting
+## 🚢 Deployment Strategies
 
-### Check ECS task logs
-```bash
-aws logs tail /aws/ecs/fastapi-app --follow
-```
+### Rolling Update (Default)
+- Gradual replacement of tasks
+- Zero downtime
+- Automatic rollback on failure
 
-### Check service status
-```bash
-aws ecs describe-services --cluster <cluster-name> --services <service-name>
-```
+### Blue/Green Deployment
+- Full environment duplication
+- Instant traffic switch
+- Easy rollback
 
-### Test database connection
-```bash
-docker-compose exec postgres psql -U user -d appdb
-```
+### Canary Deployment
+- Gradual traffic shift
+- Monitor metrics before full rollout
+- Minimize blast radius
 
-## Cleanup
+## 🤝 Contributing
 
-```bash
-# Destroy AWS resources
-cd infra
-pulumi destroy
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests: `pytest`
+5. Submit a pull request
 
-# Remove local containers
-docker-compose down -v
-```
+## 📝 License
 
-## Next Steps
+MIT License - see LICENSE file for details
 
-- [ ] Add SSL/TLS with AWS Certificate Manager
-- [ ] Configure custom domain with Route 53
-- [ ] Set up CloudWatch alarms
-- [ ] Implement auto-scaling policies
-- [ ] Add Redis for caching
-- [ ] Create internal Python packages
-- [ ] Implement feature flags with Unleash
-- [ ] Add comprehensive E2E tests
-- [ ] Set up continuous deployment
+## 🙏 Acknowledgments
 
-## Resources
+- FastAPI documentation and community
+- Pulumi AWS examples
+- AWS ECS best practices guide
+- Prometheus and Grafana communities
 
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Pulumi AWS Guide](https://www.pulumi.com/docs/clouds/aws/)
-- [Prometheus Documentation](https://prometheus.io/docs/)
-- [Grafana Documentation](https://grafana.com/docs/)
+## 📞 Support
 
-## License
+- 📖 [Full Lab Guide](LAB_GUIDE.md)
+- 🔍 [Quick Reference](QUICK_REFERENCE.md)
+- 💬 Open an issue for questions
+- 📧 Contact: your-email@example.com
 
-MIT
+---
+
+**Ready to get started?** Follow the [LAB_GUIDE.md](LAB_GUIDE.md) for step-by-step instructions!

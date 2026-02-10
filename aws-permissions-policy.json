@@ -1,0 +1,20 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:*",
+        "ecr:*",
+        "elasticfilesystem:*",
+        "logs:*",
+        "ec2:*",
+        "elasticloadbalancing:*",
+        "rds:*",
+        "iam:*",
+        "application-autoscaling:*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

@@ -1,484 +1,640 @@
 # Hands-On Lab Exercises
 
-Complete these exercises to master scalable FastAPI deployment on AWS.
+## Part 1: Infrastructure & Deployment
 
-## Part 1: Foundation & Initial Deployment
+### Exercise 1: Local Development Setup (30 minutes)
 
-### Exercise 1.1: Local Development Setup (30 minutes)
-
-**Objective**: Get the application running locally with all services.
+**Objective**: Set up and run the complete application stack locally.
 
 **Tasks**:
-1. Start the Docker Compose stack
-2. Verify all 4 services are running (FastAPI, PostgreSQL, Prometheus, Grafana)
-3. Test the FastAPI endpoints
-4. Create 5 items via the API
-5. Query Prometheus for FastAPI metrics
-6. View metrics in Grafana
+1. Clone the repository and install dependencies
+2. Start all services with Docker Compose
+3. Verify each service is running:
+   - FastAPI on port 8000
+   - PostgreSQL on port 5432
+   - Prometheus on port 9090
+   - Grafana on port 3000
+4. Create a test user via the API
+5. Query Prometheus for metrics
+6. Create a Grafana dashboard
 
 **Verification**:
 ```bash
-# Check all services are healthy
+# All services should be healthy
 docker-compose ps
 
-# Test API
+# API should respond
 curl http://localhost:8000/health
-curl http://localhost:8000/items
 
-# Check Prometheus targets
-curl http://localhost:9090/api/v1/targets | jq '.data.activeTargets'
-
-# Verify Grafana datasource
-curl -u admin:admin http://localhost:3000/api/datasources
+# Database should be accessible
+docker-compose exec postgres psql -U user -d appdb -c "SELECT 1;"
 ```
 
-**Expected Output**: All services running, API responding, metrics being collected.
+**Deliverable**: Screenshot of all services running and Grafana dashboard
 
 ---
 
-### Exercise 1.2: Infrastructure Deployment (45 minutes)
+### Exercise 2: AWS Infrastructure Deployment (45 minutes)
 
-**Objective**: Deploy AWS infrastructure using Pulumi.
+**Objective**: Deploy the complete infrastructure to AWS using Pulumi.
 
 **Tasks**:
-1. Initialize Pulumi stack
-2. Configure AWS region and database password
-3. Review the infrastructure code in `infra/__main__.py`
-4. Run `pulumi preview` and understand what will be created
-5. Deploy the infrastructure
-6. Document all created resources
+1. Install and configure Pulumi CLI
+2. Create a new Pulumi stack
+3. Configure AWS credentials
+4. Set required configuration values:
+   - AWS region
+   - Database password
+   - Database name
+5. Preview infrastructure changes
+6. Deploy to AWS
+7. Verify all resources are created
 
 **Verification**:
 ```bash
+# Check stack outputs
 cd infra
-pulumi stack output app_url
-pulumi stack output ecr_repository_url
+pulumi stack output
 
-# Verify VPC
-aws ec2 describe-vpcs --filters "Name=tag:Name,Values=fastapi-app-vpc*"
-
-# Verify ECS cluster
+# Verify resources in AWS
 aws ecs list-clusters
+aws rds describe-db-instances
+aws ecr describe-repositories
 ```
 
-**Questions to Answer**:
-- How many subnets were created?
-- What is the CIDR block of the VPC?
-- How many security groups were created?
-- What ports are exposed on the ALB?
+**Deliverable**: 
+- Pulumi stack output showing all resources
+- AWS Console screenshots of ECS cluster, RDS instance, and ECR repository
 
 ---
 
-### Exercise 1.3: Container Build & Push (30 minutes)
+### Exercise 3: Docker Image Build & Push to ECR (30 minutes)
 
-**Objective**: Build Docker image and push to ECR.
+**Objective**: Build a Docker image and push it to AWS ECR.
 
 **Tasks**:
-1. Authenticate with ECR
+1. Review the Dockerfile and understand multi-stage build
 2. Build the Docker image locally
-3. Tag the image with multiple tags (latest, v1.0.0, git commit hash)
-4. Push all tags to ECR
-5. Verify images in ECR console
+3. Test the image locally
+4. Authenticate with AWS ECR
+5. Tag the image for ECR
+6. Push the image to ECR
+7. Verify the image in ECR
 
 **Verification**:
 ```bash
-# List images in ECR
-aws ecr describe-images --repository-name fastapi-repo
+# Image should be in ECR
+aws ecr list-images --repository-name fastapi-app-repo
 
-# Check image scan results
-aws ecr describe-image-scan-findings \
-  --repository-name fastapi-repo \
-  --image-id imageTag=latest
+# Image should have correct tags
+aws ecr describe-images --repository-name fastapi-app-repo
 ```
 
-**Challenge**: Optimize the Dockerfile to reduce image size by at least 20%.
+**Deliverable**: 
+- Docker build output
+- ECR repository showing the pushed image
 
 ---
 
-### Exercise 1.4: CI/CD Pipeline Setup (45 minutes)
+### Exercise 4: CI/CD Pipeline Configuration (45 minutes)
 
-**Objective**: Configure GitHub Actions for automated deployment.
-
-**Tasks**:
-1. Add required secrets to GitHub repository
-2. Push code to trigger CI pipeline
-3. Monitor the pipeline execution
-4. Fix any failing tests
-5. Verify deployment completes successfully
-
-**Verification**:
-- CI pipeline passes all tests
-- Docker image is built and pushed
-- ECS service is updated
-- Application is accessible via ALB URL
-
-**Troubleshooting Practice**:
-- Intentionally break a test and fix it
-- Simulate a failed deployment and rollback
-
----
-
-## Part 2: Database & Migrations
-
-### Exercise 2.1: Database Schema Design (30 minutes)
-
-**Objective**: Design and implement a database schema.
+**Objective**: Set up GitHub Actions for automated testing and deployment.
 
 **Tasks**:
-1. Add a new `users` table with fields: id, email, name, created_at
-2. Add a foreign key relationship: items.user_id → users.id
-3. Create Alembic migration
-4. Apply migration locally
-5. Test the new schema
+1. Configure GitHub repository secrets:
+   - AWS_ACCESS_KEY_ID
+   - AWS_SECRET_ACCESS_KEY
+   - PULUMI_ACCESS_TOKEN
+2. Review the CI pipeline (.github/workflows/ci.yml)
+3. Review the deployment pipeline (.github/workflows/deploy.yml)
+4. Make a code change and push to trigger CI
+5. Merge to main to trigger deployment
+6. Monitor the deployment in GitHub Actions
+7. Verify the application is deployed
 
 **Verification**:
 ```bash
-# Generate migration
-alembic revision --autogenerate -m "Add users table"
+# Get application URL
+cd infra
+APP_URL=$(pulumi stack output app_url)
 
-# Apply migration
-alembic upgrade head
+# Test deployed application
+curl $APP_URL/health
+curl $APP_URL/docs
+```
 
-# Verify schema
+**Deliverable**: 
+- GitHub Actions workflow run showing successful deployment
+- Application responding at the ALB URL
+
+---
+
+### Exercise 5: Database Migrations (30 minutes)
+
+**Objective**: Create and apply database migrations using Alembic.
+
+**Tasks**:
+1. Create a new model in `app/models.py`:
+```python
+class Product(Base):
+    __tablename__ = "products"
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    price = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+```
+
+2. Generate migration:
+```bash
+alembic revision --autogenerate -m "add products table"
+```
+
+3. Review the generated migration
+4. Apply migration locally
+5. Verify table was created
+6. Push changes to trigger CI/CD
+7. Verify migration runs in production
+
+**Verification**:
+```bash
+# Check migration history
+alembic history
+
+# Verify table exists
 docker-compose exec postgres psql -U user -d appdb -c "\dt"
 ```
 
-**Challenge**: Add a many-to-many relationship between users and items (favorites).
+**Deliverable**: 
+- Migration file
+- Database schema showing new table
 
 ---
 
-### Exercise 2.2: Migration in CI/CD (30 minutes)
+## Part 2: Monitoring & Observability
 
-**Objective**: Automate database migrations in the deployment pipeline.
+### Exercise 6: Prometheus Metrics (30 minutes)
+
+**Objective**: Implement custom metrics and query them in Prometheus.
 
 **Tasks**:
-1. Update `.github/workflows/deploy.yml` to run migrations
-2. Test migration rollback
-3. Handle migration failures gracefully
-4. Add migration status check endpoint
+1. Add custom metrics to FastAPI:
+```python
+from prometheus_client import Counter, Histogram
+
+request_count = Counter('api_requests_total', 'Total API requests', ['method', 'endpoint'])
+request_duration = Histogram('api_request_duration_seconds', 'Request duration')
+```
+
+2. Instrument endpoints
+3. Deploy changes
+4. Access Prometheus UI
+5. Query metrics:
+   - `rate(api_requests_total[5m])`
+   - `histogram_quantile(0.95, api_request_duration_seconds)`
+6. Create alerts
 
 **Verification**:
-- Migrations run automatically on deployment
-- Failed migrations don't break the deployment
-- Can query current migration version via API
+- Metrics visible in Prometheus
+- Queries return data
+- Alerts configured
+
+**Deliverable**: 
+- Screenshot of Prometheus queries
+- Alert rules configuration
 
 ---
 
-## Part 3: Monitoring & Observability
+### Exercise 7: Grafana Dashboard (45 minutes)
 
-### Exercise 3.1: Custom Metrics (45 minutes)
-
-**Objective**: Add custom business metrics to Prometheus.
+**Objective**: Create a comprehensive monitoring dashboard in Grafana.
 
 **Tasks**:
-1. Add a counter for items created
-2. Add a gauge for active users
-3. Add a histogram for database query duration
-4. Expose metrics at `/metrics`
-5. Query metrics in Prometheus
+1. Access Grafana UI
+2. Add Prometheus datasource
+3. Create a new dashboard with panels:
+   - Request rate (requests/second)
+   - Error rate (4xx, 5xx)
+   - Latency (p50, p95, p99)
+   - Active connections
+   - Database query time
+   - ECS task count
+4. Add variables for filtering
+5. Set up dashboard refresh
+6. Export dashboard JSON
 
-**Code Example**:
-```python
-from prometheus_client import Counter, Gauge, Histogram
+**Verification**:
+- Dashboard shows real-time data
+- All panels display correctly
+- Variables work
 
-items_created = Counter('items_created_total', 'Total items created')
-active_users = Gauge('active_users', 'Number of active users')
-db_query_duration = Histogram('db_query_duration_seconds', 'Database query duration')
+**Deliverable**: 
+- Dashboard JSON file
+- Screenshot of complete dashboard
 
-@app.post("/items")
-def create_item(item: ItemCreate):
-    items_created.inc()
-    # ... rest of code
-```
+---
+
+### Exercise 8: CloudWatch Logs & Alarms (30 minutes)
+
+**Objective**: Set up CloudWatch monitoring and alerting.
+
+**Tasks**:
+1. View ECS task logs in CloudWatch
+2. Create log insights queries:
+   - Error count by hour
+   - Slowest endpoints
+   - Failed requests
+3. Create CloudWatch alarms:
+   - High CPU utilization (>80%)
+   - High memory utilization (>80%)
+   - Error rate threshold
+   - RDS connection count
+4. Test alarms by generating load
 
 **Verification**:
 ```bash
-# Check metrics
-curl http://localhost:8000/metrics | grep items_created
+# View logs
+aws logs tail /aws/ecs/fastapi-app-logs --follow
 
-# Query in Prometheus
-curl 'http://localhost:9090/api/v1/query?query=items_created_total'
+# List alarms
+aws cloudwatch describe-alarms
 ```
 
----
-
-### Exercise 3.2: Grafana Dashboards (45 minutes)
-
-**Objective**: Create comprehensive monitoring dashboards.
-
-**Tasks**:
-1. Create a dashboard with 6 panels:
-   - Request rate (requests/sec)
-   - Response time (p50, p95, p99)
-   - Error rate
-   - Items created over time
-   - Database connection pool status
-   - Container resource usage
-2. Set up alerts for high error rate (>5%)
-3. Configure Slack/email notifications
-
-**Verification**:
-- Dashboard shows real-time metrics
-- Alerts trigger when thresholds are exceeded
-- Notifications are received
+**Deliverable**: 
+- CloudWatch Insights queries
+- Alarm configurations
+- Screenshot of triggered alarm
 
 ---
 
-### Exercise 3.3: Distributed Tracing (Optional, 60 minutes)
+## Part 3: Advanced Features
 
-**Objective**: Add distributed tracing with Jaeger.
+### Exercise 9: Auto-Scaling Configuration (45 minutes)
 
-**Tasks**:
-1. Add Jaeger to docker-compose.yml
-2. Instrument FastAPI with OpenTelemetry
-3. Trace database queries
-4. View traces in Jaeger UI
-
----
-
-## Part 4: Advanced Features
-
-### Exercise 4.1: Feature Flags (45 minutes)
-
-**Objective**: Implement feature flags for gradual rollouts.
+**Objective**: Implement auto-scaling for ECS service.
 
 **Tasks**:
-1. Deploy Unleash server
-2. Create a feature flag "new_item_validation"
-3. Implement flag check in FastAPI
-4. Test enabling/disabling the feature
-5. Roll out to 50% of users
-
-**Code Example**:
+1. Add auto-scaling configuration to Pulumi:
 ```python
-from unleash import UnleashClient
+scaling_target = aws.appautoscaling.Target(
+    f"{app_name}-scaling-target",
+    max_capacity=10,
+    min_capacity=1,
+    resource_id=pulumi.Output.concat("service/", cluster.name, "/", service.name),
+    scalable_dimension="ecs:service:DesiredCount",
+    service_namespace="ecs",
+)
 
-unleash = UnleashClient(url="http://unleash:4242/api")
-
-@app.post("/items")
-def create_item(item: ItemCreate):
-    if unleash.is_enabled("new_item_validation"):
-        # New validation logic
-        validate_item_advanced(item)
-    else:
-        # Old validation
-        validate_item_basic(item)
+cpu_scaling = aws.appautoscaling.Policy(
+    f"{app_name}-cpu-scaling",
+    policy_type="TargetTrackingScaling",
+    resource_id=scaling_target.resource_id,
+    scalable_dimension=scaling_target.scalable_dimension,
+    service_namespace=scaling_target.service_namespace,
+    target_tracking_scaling_policy_configuration={
+        "predefined_metric_specification": {
+            "predefined_metric_type": "ECSServiceAverageCPUUtilization",
+        },
+        "target_value": 70.0,
+    },
+)
 ```
 
----
-
-### Exercise 4.2: Caching Layer (45 minutes)
-
-**Objective**: Add Redis for caching frequently accessed data.
-
-**Tasks**:
-1. Add Redis to docker-compose.yml
-2. Implement caching for GET /items
-3. Set cache TTL to 5 minutes
-4. Add cache hit/miss metrics
-5. Implement cache invalidation on POST
-
-**Verification**:
-- First request is slow (cache miss)
-- Subsequent requests are fast (cache hit)
-- Cache is invalidated on updates
-
----
-
-### Exercise 4.3: Rate Limiting (30 minutes)
-
-**Objective**: Implement API rate limiting.
-
-**Tasks**:
-1. Add rate limiting middleware
-2. Limit to 100 requests per minute per IP
-3. Return 429 status when limit exceeded
-4. Add rate limit headers to responses
-
-**Code Example**:
-```python
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-
-@app.get("/items")
-@limiter.limit("100/minute")
-def list_items():
-    # ...
-```
-
----
-
-### Exercise 4.4: API Versioning (30 minutes)
-
-**Objective**: Implement API versioning strategy.
-
-**Tasks**:
-1. Create v1 and v2 API routes
-2. Maintain backward compatibility
-3. Add deprecation warnings to v1
-4. Document version differences
-
----
-
-## Part 5: Security & Performance
-
-### Exercise 5.1: Authentication & Authorization (60 minutes)
-
-**Objective**: Add JWT-based authentication.
-
-**Tasks**:
-1. Implement user registration endpoint
-2. Implement login endpoint (returns JWT)
-3. Add authentication middleware
-4. Protect endpoints with auth
-5. Implement role-based access control
+2. Deploy auto-scaling configuration
+3. Generate load to trigger scaling
+4. Monitor scaling events
+5. Verify tasks scale up and down
 
 **Verification**:
 ```bash
-# Register user
-curl -X POST http://localhost:8000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"secret"}'
+# Check scaling policies
+aws application-autoscaling describe-scaling-policies \
+  --service-namespace ecs
 
-# Login
-TOKEN=$(curl -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"secret"}' \
-  | jq -r '.access_token')
-
-# Access protected endpoint
-curl http://localhost:8000/items \
-  -H "Authorization: Bearer $TOKEN"
+# Monitor task count
+watch -n 5 'aws ecs describe-services \
+  --cluster fastapi-app-cluster \
+  --services fastapi-app-service \
+  --query "services[0].desiredCount"'
 ```
 
----
-
-### Exercise 5.2: Input Validation & Sanitization (30 minutes)
-
-**Objective**: Implement comprehensive input validation.
-
-**Tasks**:
-1. Add Pydantic validators for all inputs
-2. Sanitize user inputs to prevent XSS
-3. Implement SQL injection protection
-4. Add request size limits
-5. Validate file uploads
+**Deliverable**: 
+- Auto-scaling configuration
+- Screenshots showing scaling events
 
 ---
 
-### Exercise 5.3: Performance Optimization (45 minutes)
+### Exercise 10: Load Testing (30 minutes)
 
-**Objective**: Optimize application performance.
+**Objective**: Perform load testing and analyze results.
 
 **Tasks**:
-1. Add database connection pooling
-2. Implement query optimization (add indexes)
-3. Enable gzip compression
-4. Add response caching headers
-5. Implement pagination for list endpoints
-
-**Benchmark**:
+1. Install load testing tool:
 ```bash
-# Before optimization
-ab -n 1000 -c 10 http://localhost:8000/items
-
-# After optimization
-ab -n 1000 -c 10 http://localhost:8000/items
+pip install locust
 ```
 
-**Target**: Reduce response time by 50%.
+2. Create `locustfile.py`:
+```python
+from locust import HttpUser, task, between
 
----
-
-### Exercise 5.4: Load Testing (45 minutes)
-
-**Objective**: Perform load testing and identify bottlenecks.
-
-**Tasks**:
-1. Install Locust or k6
-2. Create load test scenarios
-3. Run tests with 100 concurrent users
-4. Identify bottlenecks in Grafana
-5. Optimize based on findings
-
-**Load Test Script** (k6):
-```javascript
-import http from 'k6/http';
-import { check } from 'k6';
-
-export let options = {
-  stages: [
-    { duration: '2m', target: 100 },
-    { duration: '5m', target: 100 },
-    { duration: '2m', target: 0 },
-  ],
-};
-
-export default function () {
-  let response = http.get('http://localhost:8000/items');
-  check(response, {
-    'status is 200': (r) => r.status === 200,
-    'response time < 500ms': (r) => r.timings.duration < 500,
-  });
-}
+class APIUser(HttpUser):
+    wait_time = between(1, 3)
+    
+    @task(3)
+    def health_check(self):
+        self.client.get("/health")
+    
+    @task(1)
+    def list_items(self):
+        self.client.get("/items")
 ```
 
----
+3. Run load test:
+```bash
+locust -f locustfile.py --host=http://<alb-url>
+```
 
-## Part 6: Production Readiness
+4. Monitor in Grafana
+5. Observe auto-scaling
+6. Analyze results
 
-### Exercise 6.1: Health Checks & Readiness Probes (30 minutes)
+**Verification**:
+- Load test completes successfully
+- Auto-scaling triggers
+- No errors during load
 
-**Objective**: Implement comprehensive health checks.
-
-**Tasks**:
-1. Add `/health/live` endpoint (liveness probe)
-2. Add `/health/ready` endpoint (readiness probe)
-3. Check database connectivity
-4. Check external service dependencies
-5. Update ECS task definition with health checks
-
----
-
-### Exercise 6.2: Logging Strategy (45 minutes)
-
-**Objective**: Implement structured logging.
-
-**Tasks**:
-1. Configure structured JSON logging
-2. Add request ID to all logs
-3. Log important business events
-4. Set up log aggregation in CloudWatch
-5. Create log-based metrics
+**Deliverable**: 
+- Locust test results
+- Grafana dashboard during load test
 
 ---
 
-### Exercise 6.3: Disaster Recovery (60 minutes)
+### Exercise 11: SSL/TLS Configuration (45 minutes)
 
-**Objective**: Implement backup and recovery procedures.
+**Objective**: Secure the application with SSL/TLS.
 
 **Tasks**:
-1. Set up automated database backups
-2. Test database restore procedure
-3. Document recovery time objective (RTO)
-4. Document recovery point objective (RPO)
-5. Create runbook for common failures
+1. Register a domain (or use existing)
+2. Request ACM certificate:
+```bash
+aws acm request-certificate \
+  --domain-name yourdomain.com \
+  --validation-method DNS
+```
+
+3. Validate certificate via DNS
+4. Add HTTPS listener to Pulumi:
+```python
+certificate_arn = config.get("certificate-arn")
+
+https_listener = aws.lb.Listener(
+    f"{app_name}-https-listener",
+    load_balancer_arn=alb.arn,
+    port=443,
+    protocol="HTTPS",
+    certificate_arn=certificate_arn,
+    default_actions=[{
+        "type": "forward",
+        "target_group_arn": fastapi_tg.arn,
+    }],
+)
+
+# Redirect HTTP to HTTPS
+http_redirect = aws.lb.Listener(
+    f"{app_name}-http-redirect",
+    load_balancer_arn=alb.arn,
+    port=80,
+    protocol="HTTP",
+    default_actions=[{
+        "type": "redirect",
+        "redirect": {
+            "protocol": "HTTPS",
+            "port": "443",
+            "status_code": "HTTP_301",
+        },
+    }],
+)
+```
+
+5. Configure Route 53 DNS
+6. Deploy changes
+7. Test HTTPS access
+
+**Verification**:
+```bash
+# Test HTTPS
+curl -I https://yourdomain.com/health
+
+# Verify redirect
+curl -I http://yourdomain.com/health
+```
+
+**Deliverable**: 
+- Working HTTPS endpoint
+- HTTP to HTTPS redirect
 
 ---
 
-### Exercise 6.4: Cost Optimization (30 minutes)
+### Exercise 12: Blue/Green Deployment (60 minutes)
 
-**Objective**: Reduce AWS costs without sacrificing performance.
+**Objective**: Implement blue/green deployment strategy.
 
 **Tasks**:
-1. Analyze current costs in AWS Cost Explorer
-2. Implement ECR lifecycle policies
-3. Use Fargate Spot for dev environment
-4. Set up budget alerts
-5. Right-size ECS task resources
+1. Update ECS service configuration:
+```python
+service = aws.ecs.Service(
+    f"{app_name}-service",
+    cluster=cluster.arn,
+    task_definition=task_definition.arn,
+    desired_count=2,
+    deployment_configuration={
+        "deployment_circuit_breaker": {
+            "enable": True,
+            "rollback": True,
+        },
+        "maximum_percent": 200,
+        "minimum_healthy_percent": 100,
+    },
+)
+```
+
+2. Make a visible change to the application
+3. Deploy new version
+4. Monitor deployment:
+   - Old tasks running
+   - New tasks starting
+   - Health checks passing
+   - Traffic shifting
+   - Old tasks draining
+5. Verify zero downtime
+6. Test rollback scenario
+
+**Verification**:
+```bash
+# Monitor deployment
+aws ecs describe-services \
+  --cluster fastapi-app-cluster \
+  --services fastapi-app-service \
+  --query 'services[0].deployments'
+
+# Continuous health check during deployment
+while true; do
+  curl -s http://<alb-url>/health || echo "FAILED"
+  sleep 1
+done
+```
+
+**Deliverable**: 
+- Deployment logs showing blue/green process
+- Proof of zero downtime
+
+---
+
+### Exercise 13: End-to-End Testing (45 minutes)
+
+**Objective**: Implement comprehensive E2E tests.
+
+**Tasks**:
+1. Create E2E test suite:
+```python
+# tests/e2e/test_user_flow.py
+import pytest
+import httpx
+
+@pytest.mark.asyncio
+async def test_complete_user_flow():
+    async with httpx.AsyncClient(base_url=API_URL) as client:
+        # Create user
+        response = await client.post("/users", json={
+            "email": "test@example.com",
+            "name": "Test User"
+        })
+        assert response.status_code == 201
+        user_id = response.json()["id"]
+        
+        # Get user
+        response = await client.get(f"/users/{user_id}")
+        assert response.status_code == 200
+        
+        # Update user
+        response = await client.put(f"/users/{user_id}", json={
+            "name": "Updated Name"
+        })
+        assert response.status_code == 200
+        
+        # Delete user
+        response = await client.delete(f"/users/{user_id}")
+        assert response.status_code == 204
+```
+
+2. Add E2E tests to CI/CD pipeline
+3. Run tests against staging environment
+4. Implement test data cleanup
+5. Add test reporting
+
+**Verification**:
+```bash
+# Run E2E tests
+pytest tests/e2e/ -v --html=report.html
+```
+
+**Deliverable**: 
+- E2E test suite
+- Test report
+- CI/CD integration
+
+---
+
+### Exercise 14: Database Backup & Restore (30 minutes)
+
+**Objective**: Implement database backup and restore procedures.
+
+**Tasks**:
+1. Create manual RDS snapshot:
+```bash
+aws rds create-db-snapshot \
+  --db-instance-identifier fastapi-app-postgres \
+  --db-snapshot-identifier manual-backup-$(date +%Y%m%d)
+```
+
+2. Configure automated backups in Pulumi:
+```python
+rds_instance = aws.rds.Instance(
+    f"{app_name}-postgres",
+    # ... existing config ...
+    backup_retention_period=7,
+    backup_window="03:00-04:00",
+    maintenance_window="Mon:04:00-Mon:05:00",
+    copy_tags_to_snapshot=True,
+)
+```
+
+3. Test restore from snapshot:
+```bash
+aws rds restore-db-instance-from-db-snapshot \
+  --db-instance-identifier fastapi-app-postgres-restored \
+  --db-snapshot-identifier manual-backup-20240101
+```
+
+4. Verify restored database
+5. Document backup procedures
+
+**Verification**:
+```bash
+# List snapshots
+aws rds describe-db-snapshots \
+  --db-instance-identifier fastapi-app-postgres
+
+# Check backup status
+aws rds describe-db-instances \
+  --db-instance-identifier fastapi-app-postgres \
+  --query 'DBInstances[0].LatestRestorableTime'
+```
+
+**Deliverable**: 
+- Backup procedure documentation
+- Successful restore test
+
+---
+
+### Exercise 15: Cost Optimization (30 minutes)
+
+**Objective**: Analyze and optimize AWS costs.
+
+**Tasks**:
+1. Review current costs:
+```bash
+aws ce get-cost-and-usage \
+  --time-period Start=2024-01-01,End=2024-01-31 \
+  --granularity MONTHLY \
+  --metrics BlendedCost \
+  --group-by Type=SERVICE
+```
+
+2. Implement cost optimizations:
+   - ECR lifecycle policy (keep last 10 images)
+   - RDS instance right-sizing
+   - ECS task right-sizing
+   - CloudWatch log retention
+   - Unused resource cleanup
+
+3. Set up cost alerts:
+```bash
+aws budgets create-budget \
+  --account-id <account-id> \
+  --budget file://budget.json \
+  --notifications-with-subscribers file://notifications.json
+```
+
+4. Document cost-saving measures
+
+**Verification**:
+- Cost report showing optimizations
+- Budget alerts configured
+
+**Deliverable**: 
+- Cost analysis report
+- Optimization recommendations
 
 ---
 
@@ -487,39 +643,35 @@ export default function () {
 ### Challenge 1: Multi-Region Deployment
 Deploy the application to multiple AWS regions with Route 53 failover.
 
-### Challenge 2: Blue-Green Deployment
-Implement blue-green deployment strategy with zero downtime.
+### Challenge 2: Feature Flags
+Implement feature flags using Unleash or similar service.
 
-### Challenge 3: Chaos Engineering
-Use AWS Fault Injection Simulator to test resilience.
+### Challenge 3: API Rate Limiting
+Add rate limiting to protect against abuse.
 
-### Challenge 4: GraphQL API
-Add a GraphQL endpoint alongside REST API.
+### Challenge 4: Secrets Management
+Migrate secrets to AWS Secrets Manager.
 
-### Challenge 5: WebSocket Support
-Add real-time features using WebSockets.
+### Challenge 5: Canary Deployments
+Implement canary deployment with gradual traffic shifting.
 
 ---
 
 ## Assessment Criteria
 
-For each exercise, you should be able to:
-- ✅ Complete all tasks
-- ✅ Verify the implementation works
-- ✅ Explain the concepts and decisions
-- ✅ Troubleshoot common issues
-- ✅ Document your work
+Each exercise will be evaluated on:
+- **Completeness** (40%): All tasks completed
+- **Correctness** (30%): Solution works as expected
+- **Documentation** (20%): Clear documentation and screenshots
+- **Best Practices** (10%): Follows security and operational best practices
 
-## Resources
+## Submission
 
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Pulumi AWS Examples](https://github.com/pulumi/examples)
-- [Prometheus Best Practices](https://prometheus.io/docs/practices/)
-- [AWS ECS Best Practices](https://docs.aws.amazon.com/AmazonECS/latest/bestpracticesguide/)
+Submit your work including:
+1. All code changes (GitHub repository)
+2. Screenshots of working deployments
+3. Configuration files
+4. Documentation of any issues encountered
+5. Lessons learned summary
 
-## Getting Help
-
-- Check the troubleshooting section in DEPLOYMENT_GUIDE.md
-- Review CloudWatch logs for errors
-- Use `pulumi logs` to see infrastructure events
-- Join the community Discord/Slack for support
+Good luck! 🚀

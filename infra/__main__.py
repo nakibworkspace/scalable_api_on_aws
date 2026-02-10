@@ -1,79 +1,94 @@
 import pulumi
 import pulumi_aws as aws
-import pulumi_awsx as awsx
+import pulumi_eks as eks
 import json
 
 # Configuration
 config = pulumi.Config()
 app_name = "fastapi-app"
 
-# External database URL
-external_db_url = config.get("external-db-url") or "postgresql://postgres:postgres@100.84.171.106:5432/postgres"
-
-# 1. VPC and Networking
-vpc = awsx.ec2.Vpc(
+# 1. VPC for EKS
+vpc = aws.ec2.Vpc(
     f"{app_name}-vpc",
-    number_of_availability_zones=2,
-    nat_gateways=awsx.ec2.NatGatewayConfigurationArgs(strategy="Single")
+    cidr_block="10.0.0.0/16",
+    enable_dns_hostnames=True,
+    enable_dns_support=True,
+    tags={"Name": f"{app_name}-vpc"},
 )
 
-# 2. Security Groups
-# ALB Security Group
-alb_sg = aws.ec2.SecurityGroup(
-    f"{app_name}-alb-sg",
-    vpc_id=vpc.vpc_id,
-    description="Security group for ALB",
-    ingress=[
-        aws.ec2.SecurityGroupIngressArgs(
-            protocol="tcp",
-            from_port=80,
-            to_port=80,
-            cidr_blocks=["0.0.0.0/0"],
-        ),
-        aws.ec2.SecurityGroupIngressArgs(
-            protocol="tcp",
-            from_port=443,
-            to_port=443,
-            cidr_blocks=["0.0.0.0/0"],
-        ),
-    ],
-    egress=[
-        aws.ec2.SecurityGroupEgressArgs(
-            protocol="-1",
-            from_port=0,
-            to_port=0,
-            cidr_blocks=["0.0.0.0/0"],
-        ),
-    ],
+# Internet Gateway
+igw = aws.ec2.InternetGateway(
+    f"{app_name}-igw",
+    vpc_id=vpc.id,
+    tags={"Name": f"{app_name}-igw"},
 )
 
-# ECS Tasks Security Group
-ecs_sg = aws.ec2.SecurityGroup(
-    f"{app_name}-ecs-sg",
-    vpc_id=vpc.vpc_id,
-    description="Security group for ECS tasks",
-    ingress=[
-        aws.ec2.SecurityGroupIngressArgs(
-            protocol="tcp",
-            from_port=8000,
-            to_port=8000,
-            security_groups=[alb_sg.id],
-        ),
-    ],
-    egress=[
-        aws.ec2.SecurityGroupEgressArgs(
-            protocol="-1",
-            from_port=0,
-            to_port=0,
-            cidr_blocks=["0.0.0.0/0"],
-        ),
-    ],
+# Public Subnets in different AZs
+public_subnet_1 = aws.ec2.Subnet(
+    f"{app_name}-public-subnet-1",
+    vpc_id=vpc.id,
+    cidr_block="10.0.1.0/24",
+    availability_zone="ap-southeast-1a",
+    map_public_ip_on_launch=True,
+    tags={
+        "Name": f"{app_name}-public-subnet-1",
+        "kubernetes.io/role/elb": "1",
+    },
 )
 
-# 3. ECS Cluster
-cluster = aws.ecs.get_cluster(cluster_name="default")
+public_subnet_2 = aws.ec2.Subnet(
+    f"{app_name}-public-subnet-2",
+    vpc_id=vpc.id,
+    cidr_block="10.0.2.0/24",
+    availability_zone="ap-southeast-1b",
+    map_public_ip_on_launch=True,
+    tags={
+        "Name": f"{app_name}-public-subnet-2",
+        "kubernetes.io/role/elb": "1",
+    },
+)
 
-# 4. ECR Repository
+# Route Table
+route_table = aws.ec2.RouteTable(
+    f"{app_name}-rt",
+    vpc_id=vpc.id,
+    tags={"Name": f"{app_name}-rt"},
+)
+
+# Route to Internet Gateway
+route = aws.ec2.Route(
+    f"{app_name}-route",
+    route_table_id=route_table.id,
+    destination_cidr_block="0.0.0.0/0",
+    gateway_id=igw.id,
+)
+
+# Associate Route Table with Subnets
+rta1 = aws.ec2.RouteTableAssociation(
+    f"{app_name}-rta-1",
+    subnet_id=public_subnet_1.id,
+    route_table_id=route_table.id,
+)
+
+rta2 = aws.ec2.RouteTableAssociation(
+    f"{app_name}-rta-2",
+    subnet_id=public_subnet_2.id,
+    route_table_id=route_table.id,
+)
+
+# 2. EKS Cluster
+cluster = eks.Cluster(
+    f"{app_name}-cluster",
+    vpc_id=vpc.id,
+    subnet_ids=[public_subnet_1.id, public_subnet_2.id],
+    instance_type="t3.medium",
+    desired_capacity=2,
+    min_size=1,
+    max_size=3,
+    enabled_cluster_log_types=["api", "audit", "authenticator"],
+)
+
+# 3. ECR Repository
 repo = aws.ecr.Repository(
     f"{app_name}-repo",
     force_delete=True,
@@ -102,132 +117,7 @@ aws.ecr.LifecyclePolicy(
     }),
 )
 
-# 5. IAM Roles
-task_exec_role = aws.iam.Role(
-    f"{app_name}-task-exec-role",
-    assume_role_policy=json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [{
-            "Action": "sts:AssumeRole",
-            "Principal": {"Service": "ecs-tasks.amazonaws.com"},
-            "Effect": "Allow",
-        }],
-    }),
-)
-
-aws.iam.RolePolicyAttachment(
-    f"{app_name}-task-exec-policy",
-    role=task_exec_role.name,
-    policy_arn="arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
-)
-
-task_role = aws.iam.Role(
-    f"{app_name}-task-role",
-    assume_role_policy=json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [{
-            "Action": "sts:AssumeRole",
-            "Principal": {"Service": "ecs-tasks.amazonaws.com"},
-            "Effect": "Allow",
-        }],
-    }),
-)
-
-# 6. Task Definition (FastAPI only)
-task_definition = aws.ecs.TaskDefinition(
-    f"{app_name}-task",
-    family=f"{app_name}-task",
-    cpu="256",
-    memory="512",
-    network_mode="awsvpc",
-    requires_compatibilities=["FARGATE"],
-    execution_role_arn=task_exec_role.arn,
-    task_role_arn=task_role.arn,
-    container_definitions=pulumi.Output.all(repo.repository_url, external_db_url).apply(
-        lambda args: json.dumps([
-            {
-                "name": "fastapi",
-                "image": f"{args[0]}:latest",
-                "essential": True,
-                "portMappings": [{"containerPort": 8000, "protocol": "tcp"}],
-                "environment": [
-                    {"name": "DATABASE_URL", "value": args[1]},
-                ],
-                "healthCheck": {
-                    "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
-                    "interval": 30,
-                    "timeout": 5,
-                    "retries": 3,
-                    "startPeriod": 60,
-                },
-            },
-        ])
-    ),
-)
-
-# 7. Application Load Balancer
-alb = aws.lb.LoadBalancer(
-    f"{app_name}-alb",
-    internal=False,
-    load_balancer_type="application",
-    security_groups=[alb_sg.id],
-    subnets=vpc.public_subnet_ids,
-)
-
-# Target Group
-fastapi_tg = aws.lb.TargetGroup(
-    f"{app_name}-tg",
-    port=8000,
-    protocol="HTTP",
-    target_type="ip",
-    vpc_id=vpc.vpc_id,
-    health_check=aws.lb.TargetGroupHealthCheckArgs(
-        enabled=True,
-        path="/health",
-        interval=30,
-        timeout=5,
-        healthy_threshold=2,
-        unhealthy_threshold=3,
-    ),
-)
-
-# HTTP Listener
-http_listener = aws.lb.Listener(
-    f"{app_name}-http-listener",
-    load_balancer_arn=alb.arn,
-    port=80,
-    protocol="HTTP",
-    default_actions=[
-        aws.lb.ListenerDefaultActionArgs(
-            type="forward",
-            target_group_arn=fastapi_tg.arn,
-        ),
-    ],
-)
-
-# 8. ECS Service
-service = aws.ecs.Service(
-    f"{app_name}-service",
-    cluster=cluster.arn,
-    task_definition=task_definition.arn,
-    desired_count=1,
-    launch_type="FARGATE",
-    network_configuration=aws.ecs.ServiceNetworkConfigurationArgs(
-        subnets=vpc.private_subnet_ids,
-        security_groups=[ecs_sg.id],
-        assign_public_ip=False,
-    ),
-    load_balancers=[
-        aws.ecs.ServiceLoadBalancerArgs(
-            target_group_arn=fastapi_tg.arn,
-            container_name="fastapi",
-            container_port=8000,
-        ),
-    ],
-)
-
 # Exports
-pulumi.export("app_url", pulumi.Output.concat("http://", alb.dns_name))
+pulumi.export("kubeconfig", cluster.kubeconfig)
+pulumi.export("cluster_name", cluster.eks_cluster.name)
 pulumi.export("ecr_repository_url", repo.repository_url)
-pulumi.export("cluster_name", cluster.name)
-pulumi.export("service_name", service.name)
