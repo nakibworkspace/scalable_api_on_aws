@@ -960,6 +960,15 @@ volumes:
   prometheus_data:
   grafana_data:
 ```
+> update your DATABASE_URL
+```bash
+fastapi:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@your-db-host:5432/postgres ## DB URL
+```
 
 **Understanding Docker Compose:**
 
