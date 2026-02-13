@@ -25,7 +25,7 @@ By the end of this lab, you will be able to:
 
 You join a development team at a growing startup. The team has built a FastAPI application that manages items in a database and provides sentiment analysis for customer feedback. Currently, the application runs only on developers' local machines. The product team cannot access it for testing. The operations team has no visibility into system health. Deployment requires manual steps that often fail.
 
-Your task: Transform this local application into a production-ready service deployed on AWS with automated deployments, monitoring, and database management.
+Your task is to transform this local application into a production-ready service deployed on AWS with automated deployments, monitoring, and database management.
 
 This system will provide:
 
@@ -56,21 +56,75 @@ sudo apt install -y python3-venv python3-pip unzip
 python3 -m venv venv
 source venv/bin/activate
 
-# Install Pulumi CLI
-curl -fsSL https://get.pulumi.com | sh
-
 # Install AWS CLI
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip awscliv2.zip
 sudo ./aws/install
 
-# Configure AWS CLI
-aws configure
+# Install Pulumi CLI
+curl -fsSL https://get.pulumi.com | sh
+export PATH=$PATH:$HOME/.pulumi/bin
+echo 'export PATH=$PATH:$HOME/.pulumi/bin' >> ~/.bashrc
+source ~/.bashrc
+pulumi version
 ```
 
+#### Configure AWS CLI
+Generate AWS Credentials and configure aws
+![img]()
+```bash
+aws configure
+```
+![img]()
+
+#### Create a Postgres Server
+Use the Database URL to connect own DB server for the project.
+
+![img]()
+
+## Project Structure
+```
+fastapi-aws
+├── .env
+├── .env.example
+├── .git/
+├── .github/
+├── .gitignore
+├── .vscode/
+├── Dockerfile
+├── Makefile
+├── alembic.ini
+├── app/
+│   ├── config.py
+│   ├── database.py
+│   ├── main.py
+│   ├── requirements.txt
+│   ├── test_main.py
+│   └── train_model.py
+├── aws-permissions-policy.json
+├── docker-compose.yml
+├── infra/
+│   ├── .gitignore
+│   ├── Pulumi.yaml
+│   ├── __main__.py
+│   └── requirements.txt
+├── migrations/
+│   ├── env.py
+│   └── script.py.mako
+├── monitoring/
+│   ├── grafana-dashboard.json
+│   ├── grafana-datasource.yml
+│   └── prometheus.yml
+├── pytest.ini
+├── setup-external-db.sh
+├── test_db_connection.py
+└── test_ml_model.sh
+```
 Create project structure:
 
 ```bash
+mkdir fastapi-aws
+cd fastapi-aws
 mkdir -p app infra migrations monitoring .github/workflows
 ```
 
@@ -233,6 +287,7 @@ Create `.env` file:
 ```bash
 DATABASE_URL=postgresql://postgres:postgres@your-db-host:5432/postgres
 ```
+Replace this `DATABASE_URL` with the generated postgres database from Poridhi Lab.
 
 Create `app/requirements.txt`:
 
@@ -401,7 +456,7 @@ Stop your server (Ctrl+C) and restart:
 python3 main.py
 ```
 
-Run the tests:
+Run these tests:
 
 ```bash
 # Create an item
@@ -846,13 +901,143 @@ curl http://localhost:8000/health
 curl http://localhost:8000/model/info
 ```
 
-### 4.5 Checkpoint
+### 4.5 Docker Compose for Multi-Service Setup
+
+Docker Compose allows you to define and run multi-container applications. This is useful for running your application alongside monitoring services.
+
+Create `docker-compose.yml` in the project root:
+
+```yaml
+services:
+  fastapi:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@your-db-host:5432/postgres
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - app-network
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana-datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+    networks:
+      - app-network
+    depends_on:
+      - prometheus
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+```
+
+**Understanding Docker Compose:**
+
+- **services**: Defines each container in your application
+- **fastapi**: Your main application container
+  - `build: .` - Builds from Dockerfile in current directory
+  - `ports` - Maps host port 8000 to container port 8000
+  - `environment` - Sets environment variables
+  - `healthcheck` - Monitors container health
+- **prometheus**: Metrics collection service
+  - Uses official Prometheus image
+  - Mounts configuration file
+  - Stores data in named volume
+- **grafana**: Metrics visualization
+  - Uses official Grafana image
+  - Depends on Prometheus (starts after it)
+  - Pre-configured with datasource
+- **networks**: Creates isolated network for services to communicate
+- **volumes**: Persistent storage for Prometheus and Grafana data
+
+### 4.6 Start the Complete Stack
+
+Start all services:
+
+```bash
+docker compose up -d
+```
+
+Verify all containers are running:
+
+```bash
+docker compose ps
+```
+
+Test the services:
+
+```bash
+# FastAPI
+curl http://localhost:8000/health
+
+# Prometheus
+curl http://localhost:9090/-/healthy
+
+# Grafana (in browser)
+# http://localhost:3001 (admin/admin)
+```
+
+View logs:
+
+```bash
+# All services
+docker compose logs -f
+
+# Specific service
+docker compose logs -f fastapi
+```
+
+Stop all services:
+
+```bash
+docker compose down
+```
+
+Stop and remove volumes:
+
+```bash
+docker compose down -v
+```
+
+### 4.7 Checkpoint
 
 **Self-Assessment:**
 - [ ] Docker image builds successfully
 - [ ] Container runs and responds to health checks
 - [ ] ML model is included in the container
 - [ ] You understand the difference between images and containers
+- [ ] Docker Compose starts all services together
+- [ ] You can access FastAPI, Prometheus, and Grafana
 
 ## Epilogue: The Complete System
 
@@ -950,7 +1135,7 @@ datasources:
 ### 5.4 Start Monitoring
 
 ```bash
-docker-compose up -d
+docker compose up -d
 
 # Access Prometheus: http://localhost:9090
 # Access Grafana: http://localhost:3001 (admin/admin)
@@ -965,36 +1150,297 @@ docker-compose up -d
 
 Manual infrastructure provisioning is error-prone. Pulumi treats infrastructure as code.
 
-### 6.1 Configure Pulumi
+### 6.1 Configure AWS CLI
+```bash
+aws configure
+```
+Generate and enter your AWS Access Key ID, Secret Key ID, and preferred region(`ap-southeast-1`)
 
-Create `infra/Pulumi.yaml`:
+The configuration should look like this:
 
-```yaml
-name: fastapi-app
-runtime: python
-description: FastAPI application infrastructure on AWS EC2
+
+
+### 6.2: Install Pulumi (if not done before)
+Install Pulumi and add it to your system PATH for command-line access.
+```bash
+curl -fsSL https://get.pulumi.com | sh
+export PATH=$PATH:$HOME/.pulumi/bin
+echo 'export PATH=$PATH:$HOME/.pulumi/bin' >> ~/.bashrc
+source ~/.bashrc
+pulumi version
+```
+### 6.3: Generate Pulumi Access Token
+Before initializing your Pulumi project, you need to authenticate with Pulumi Cloud to store your infrastructure state.
+```bash
+sudo apt install python3.8-venv python3-pip
 ```
 
-Create `infra/requirements.txt`:
-
+### 6.4 Create Pulumi Project
+```bash
+cd fastapi-aws/infra
 ```
+Visit Pulumi Cloud and log in
+Navigate to Settings → Access Tokens
+Click Create Token
+Enter a description (e.g., "Fraud Detection Lab")
+Copy the generated token securely
+No we need to generate personal access token
+
+ After that create token with description
+
+
+
+Now we are ready to initialize the pulumi project
+
+### 6.5 Initialize Pulumi Project
+```bash
+pulumi new aws-python
+```
+Enter the Pulumi Personal Access Token generated from Pulumi Cloud account.
+
+Then,
+
+**project name** - fraud-detection
+
+**description** - AWS python project
+
+**stack** - dev
+
+**dependencies** - pip
+
+**region** - ap-southeast-1 Result should be look like this
+
+#### Troubleshoot:
+
+The pulumi dependencies that come within the requirements.txt might create an issue. To resolve that change the requirements.txt file to
+```bash
 pulumi>=3.0.0,<4.0.0
 pulumi-aws>=6.0.0,<7.0.0
 ```
+Create a virtual environment
+```bash
+python3 -m venv venv 
+source venv/bin/activate
+```
+Then run,
+```bash
+pip install -r requirements.txt
+```
 
-### 6.2 Define Infrastructure
+### 6.6 Build the Infrastructue
+```python
+import pulumi
+import pulumi_aws as aws
+import json
 
-The `infra/__main__.py` file creates:
+# Configuration
+config = pulumi.Config()
+app_name = "fastapi-app"
+database_url = config.get("database_url") or "postgresql://postgres:postgres@localhost:5432/postgres"
 
-- VPC with public subnet
-- Internet Gateway and routing
-- Security Group (ports 80, 8000, 22)
-- ECR repository for Docker images
-- IAM role for EC2 with ECR access
-- EC2 instance with Docker
-- User data script to pull and run containers
+# 1. VPC
+vpc = aws.ec2.Vpc(
+    f"{app_name}-vpc",
+    cidr_block="10.0.0.0/16",
+    enable_dns_hostnames=True,
+    enable_dns_support=True,
+    tags={"Name": f"{app_name}-vpc"},
+)
 
-### 6.3 Deploy Infrastructure
+# Internet Gateway
+igw = aws.ec2.InternetGateway(
+    f"{app_name}-igw",
+    vpc_id=vpc.id,
+    tags={"Name": f"{app_name}-igw"},
+)
+
+# Public Subnet
+public_subnet = aws.ec2.Subnet(
+    f"{app_name}-public-subnet",
+    vpc_id=vpc.id,
+    cidr_block="10.0.1.0/24",
+    availability_zone="ap-southeast-1a",
+    map_public_ip_on_launch=True,
+    tags={"Name": f"{app_name}-public-subnet"},
+)
+
+# Route Table
+route_table = aws.ec2.RouteTable(
+    f"{app_name}-rt",
+    vpc_id=vpc.id,
+    tags={"Name": f"{app_name}-rt"},
+)
+
+# Route to Internet Gateway
+route = aws.ec2.Route(
+    f"{app_name}-route",
+    route_table_id=route_table.id,
+    destination_cidr_block="0.0.0.0/0",
+    gateway_id=igw.id,
+)
+
+# Associate Route Table with Subnet
+rta = aws.ec2.RouteTableAssociation(
+    f"{app_name}-rta",
+    subnet_id=public_subnet.id,
+    route_table_id=route_table.id,
+)
+
+# 2. Security Group for EC2
+security_group = aws.ec2.SecurityGroup(
+    f"{app_name}-sg",
+    vpc_id=vpc.id,
+    description="Allow HTTP traffic",
+    ingress=[
+        aws.ec2.SecurityGroupIngressArgs(
+            protocol="tcp",
+            from_port=80,
+            to_port=80,
+            cidr_blocks=["0.0.0.0/0"],
+        ),
+        aws.ec2.SecurityGroupIngressArgs(
+            protocol="tcp",
+            from_port=8000,
+            to_port=8000,
+            cidr_blocks=["0.0.0.0/0"],
+        ),
+        aws.ec2.SecurityGroupIngressArgs(
+            protocol="tcp",
+            from_port=22,
+            to_port=22,
+            cidr_blocks=["0.0.0.0/0"],
+        ),
+    ],
+    egress=[
+        aws.ec2.SecurityGroupEgressArgs(
+            protocol="-1",
+            from_port=0,
+            to_port=0,
+            cidr_blocks=["0.0.0.0/0"],
+        ),
+    ],
+    tags={"Name": f"{app_name}-sg"},
+)
+
+# 3. ECR Repository
+repo = aws.ecr.Repository(
+    f"{app_name}-repo",
+    force_delete=True,
+    image_scanning_configuration=aws.ecr.RepositoryImageScanningConfigurationArgs(
+        scan_on_push=True,
+    ),
+)
+
+# ECR Lifecycle Policy
+aws.ecr.LifecyclePolicy(
+    f"{app_name}-lifecycle",
+    repository=repo.name,
+    policy=json.dumps({
+        "rules": [{
+            "rulePriority": 1,
+            "description": "Keep last 10 images",
+            "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": 10
+            },
+            "action": {
+                "type": "expire"
+            }
+        }]
+    }),
+)
+
+# 4. IAM Role for EC2
+ec2_role = aws.iam.Role(
+    f"{app_name}-ec2-role",
+    assume_role_policy=json.dumps({
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Action": "sts:AssumeRole",
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "ec2.amazonaws.com"
+            }
+        }]
+    }),
+)
+
+# Attach ECR read policy
+aws.iam.RolePolicyAttachment(
+    f"{app_name}-ecr-policy",
+    role=ec2_role.name,
+    policy_arn="arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+)
+
+# Attach SSM policy for Session Manager
+aws.iam.RolePolicyAttachment(
+    f"{app_name}-ssm-policy",
+    role=ec2_role.name,
+    policy_arn="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+)
+
+# Instance Profile
+instance_profile = aws.iam.InstanceProfile(
+    f"{app_name}-instance-profile",
+    role=ec2_role.name,
+)
+
+# 5. User Data Script
+user_data = pulumi.Output.all(repo.repository_url, database_url).apply(
+    lambda args: f"""#!/bin/bash
+set -e
+
+# Install Docker
+yum update -y
+yum install -y docker
+systemctl start docker
+systemctl enable docker
+usermod -a -G docker ec2-user
+
+# Install AWS CLI v2
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+./aws/install
+
+# Login to ECR
+aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin {args[0].split('/')[0]}
+
+# Pull and run the container
+docker pull {args[0]}:latest
+docker stop fastapi-app || true
+docker rm fastapi-app || true
+docker run -d --name fastapi-app --restart unless-stopped \
+  -p 80:8000 \
+  -e DATABASE_URL="{args[1]}" \
+  {args[0]}:latest
+
+echo "Deployment complete!"
+"""
+)
+
+# 6. EC2 Instance
+instance = aws.ec2.Instance(
+    f"{app_name}-instance",
+    instance_type="t3.small",
+    ami="ami-01811d4912b4ccb26",  # Amazon Linux 2023 in ap-southeast-1
+    subnet_id=public_subnet.id,
+    vpc_security_group_ids=[security_group.id],
+    iam_instance_profile=instance_profile.name,
+    user_data=user_data,
+    tags={"Name": f"{app_name}-instance"},
+)
+
+# Exports
+pulumi.export("instance_id", instance.id)
+pulumi.export("instance_public_ip", instance.public_ip)
+pulumi.export("instance_public_dns", instance.public_dns)
+pulumi.export("ecr_repository_url", repo.repository_url)
+pulumi.export("application_url", instance.public_dns.apply(lambda dns: f"http://{dns}"))
+```
+
+
+Deploy Infrastructure
 
 ```bash
 pulumi login
