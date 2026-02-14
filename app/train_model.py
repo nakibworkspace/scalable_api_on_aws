@@ -102,3 +102,5 @@ for text, pred, prob in zip(test_texts, predictions, probabilities):
     sentiment = "positive" if pred == 1 else "negative"
     confidence = max(prob)
     print(f"  '{text}' -> {sentiment} (confidence: {confidence:.2f})")
+
+

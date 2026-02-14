@@ -1,6 +1,5 @@
 import pulumi
 import pulumi_aws as aws
-import json
 
 # Configuration
 config = pulumi.Config()
@@ -91,111 +90,48 @@ security_group = aws.ec2.SecurityGroup(
     tags={"Name": f"{app_name}-sg"},
 )
 
-# 3. ECR Repository
-repo = aws.ecr.Repository(
-    f"{app_name}-repo",
-    force_delete=True,
-    image_scanning_configuration=aws.ecr.RepositoryImageScanningConfigurationArgs(
-        scan_on_push=True,
-    ),
-)
-
-# ECR Lifecycle Policy
-aws.ecr.LifecyclePolicy(
-    f"{app_name}-lifecycle",
-    repository=repo.name,
-    policy=json.dumps({
-        "rules": [{
-            "rulePriority": 1,
-            "description": "Keep last 10 images",
-            "selection": {
-                "tagStatus": "any",
-                "countType": "imageCountMoreThan",
-                "countNumber": 10
-            },
-            "action": {
-                "type": "expire"
-            }
-        }]
-    }),
-)
-
-# 4. IAM Role for EC2
-ec2_role = aws.iam.Role(
-    f"{app_name}-ec2-role",
-    assume_role_policy=json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [{
-            "Action": "sts:AssumeRole",
-            "Effect": "Allow",
-            "Principal": {
-                "Service": "ec2.amazonaws.com"
-            }
-        }]
-    }),
-)
-
-# Attach ECR read policy
-aws.iam.RolePolicyAttachment(
-    f"{app_name}-ecr-policy",
-    role=ec2_role.name,
-    policy_arn="arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
-)
-
-# Attach SSM policy for Session Manager
-aws.iam.RolePolicyAttachment(
-    f"{app_name}-ssm-policy",
-    role=ec2_role.name,
-    policy_arn="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
-)
-
-# Instance Profile
-instance_profile = aws.iam.InstanceProfile(
-    f"{app_name}-instance-profile",
-    role=ec2_role.name,
-)
-
-# 5. User Data Script
-user_data = pulumi.Output.all(repo.repository_url, database_url).apply(
-    lambda args: f"""#!/bin/bash
+# 3. User Data Script - simplified without ECR
+user_data = f"""#!/bin/bash
 set -e
 
 # Install Docker
 yum update -y
-yum install -y docker
+yum install -y docker git
 systemctl start docker
 systemctl enable docker
 usermod -a -G docker ec2-user
 
-# Install AWS CLI v2
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
-./aws/install
+# Install Docker Compose
+curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
 
-# Login to ECR
-aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin {args[0].split('/')[0]}
+# Clone your repo and run with docker-compose
+# Note: You'll need to manually deploy or use GitHub Actions
+echo "Docker installed. Ready for deployment."
+echo "DATABASE_URL={database_url}" > /home/ec2-user/.env
 
-# Pull and run the container
-docker pull {args[0]}:latest
-docker stop fastapi-app || true
-docker rm fastapi-app || true
-docker run -d --name fastapi-app --restart unless-stopped \
-  -p 80:8000 \
-  -e DATABASE_URL="{args[1]}" \
-  {args[0]}:latest
+# Create a simple deployment script
+cat > /home/ec2-user/deploy.sh << 'EOF'
+#!/bin/bash
+cd /home/ec2-user/app
+git pull
+docker-compose down
+docker-compose up -d --build
+EOF
 
-echo "Deployment complete!"
+chmod +x /home/ec2-user/deploy.sh
+chown ec2-user:ec2-user /home/ec2-user/deploy.sh
+
+echo "Deployment complete! SSH in and run ./deploy.sh after cloning your repo"
 """
-)
 
-# 6. EC2 Instance
+# 4. EC2 Instance
 instance = aws.ec2.Instance(
     f"{app_name}-instance",
     instance_type="t3.small",
     ami="ami-01811d4912b4ccb26",  # Amazon Linux 2023 in ap-southeast-1
     subnet_id=public_subnet.id,
     vpc_security_group_ids=[security_group.id],
-    iam_instance_profile=instance_profile.name,
     user_data=user_data,
     tags={"Name": f"{app_name}-instance"},
 )
@@ -204,5 +140,5 @@ instance = aws.ec2.Instance(
 pulumi.export("instance_id", instance.id)
 pulumi.export("instance_public_ip", instance.public_ip)
 pulumi.export("instance_public_dns", instance.public_dns)
-pulumi.export("ecr_repository_url", repo.repository_url)
 pulumi.export("application_url", instance.public_dns.apply(lambda dns: f"http://{dns}"))
+pulumi.export("ssh_command", instance.public_ip.apply(lambda ip: f"ssh ec2-user@{ip}"))
