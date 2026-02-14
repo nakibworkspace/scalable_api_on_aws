@@ -52,10 +52,6 @@ Required tools:
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y python3-venv python3-pip unzip
 
-# Install Python virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
 # Install AWS CLI
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip awscliv2.zip
@@ -527,11 +523,235 @@ Status code: 404
 - [ ] You understand why we use `finally` blocks for database cleanup
 - [ ] You can explain the difference between 200, 201, and 404 status codes
 
-## Chapter 3: Integrating Machine Learning Models
+## Chapter 3: Database Migrations with Alembic
+
+As applications evolve, database schemas change. Adding columns, creating indexes, or modifying constraints requires a systematic approach. Manual SQL scripts are error-prone and difficult to track across environments.
+
+Alembic provides version-controlled database migrations. Each schema change becomes a tracked migration file that can be applied, rolled back, and audited.
+
+### 3.1 What You Will Build
+
+Database migration infrastructure using Alembic that tracks schema changes and applies them consistently across environments.
+
+Key Concept: Migrations are version-controlled Python scripts that describe schema changes. Alembic maintains a version table in your database to track which migrations have been applied.
+
+### 3.2 Think First: Why Migrations Matter
+
+**Question 1:** Your application adds a new `price` column to the `items` table. Without migrations, how would you update production databases?
+
+**Question 2:** What happens if two developers create conflicting schema changes?
+
+<details>
+<summary>Click to review answers</summary>
+
+**Answer 1:** Without migrations, you would need to manually run SQL commands on each environment. This is error-prone, difficult to track, and can cause inconsistencies between environments.
+
+**Answer 2:** Migration tools detect conflicts through version tracking. Developers must resolve conflicts by creating a merge migration or reordering changes, ensuring schema consistency.
+
+</details>
+
+### 3.3 Initialize Alembic
+
+Install Alembic:
+
+```bash
+pip install alembic
+```
+
+Initialize Alembic in your project:
+
+```bash
+alembic init migrations
+```
+
+This creates:
+- `alembic.ini` - Configuration file
+- `migrations/` - Directory for migration scripts
+- `migrations/env.py` - Migration environment configuration
+
+### 3.4 Configure Alembic
+
+Edit `alembic.ini` to use environment variables for the database URL. Comment out the sqlalchemy.url line:
+
+```ini
+[alembic]
+script_location = migrations
+prepend_sys_path = .
+version_path_separator = os
+
+# Remove or comment out the sqlalchemy.url line
+# sqlalchemy.url = driver://user:pass@localhost/dbname
+```
+
+Edit `migrations/env.py` to import your models and use the database URL from environment:
+
+```python
+from logging.config import fileConfig
+from sqlalchemy import engine_from_config, pool
+from alembic import context
+import os
+import sys
+
+# Add your app directory to the path
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+# Import your models
+from app.main import Base
+
+# this is the Alembic Config object
+config = context.config
+
+# Set the database URL from environment
+config.set_main_option(
+    'sqlalchemy.url',
+    os.getenv('DATABASE_URL', 'postgresql://user:pass@localhost:5432/appdb')
+)
+
+# Interpret the config file for Python logging
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+def run_migrations_offline() -> None:
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+def run_migrations_online() -> None:
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection, target_metadata=target_metadata
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+```
+
+### 3.5 Create Initial Migration
+
+Generate the initial migration based on your models:
+
+```bash
+alembic revision --autogenerate -m "Initial migration with items table"
+```
+
+This creates a migration file in `migrations/versions/` with the schema definition.
+
+### 3.6 Understanding Migration Files
+
+Open the generated migration file. It contains two functions:
+
+```python
+def upgrade() -> None:
+    # Commands to apply the migration
+    op.create_table('items',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('name', sa.String(), nullable=True),
+        sa.Column('description', sa.String(), nullable=True),
+        sa.Column('created_at', sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_items_id'), 'items', ['id'], unique=False)
+    op.create_index(op.f('ix_items_name'), 'items', ['name'], unique=False)
+
+def downgrade() -> None:
+    # Commands to revert the migration
+    op.drop_index(op.f('ix_items_name'), table_name='items')
+    op.drop_index(op.f('ix_items_id'), table_name='items')
+    op.drop_table('items')
+```
+
+**Question:** Why does each migration have both `upgrade()` and `downgrade()` functions?
+
+<details>
+<summary>Click for the answer</summary>
+
+The `upgrade()` function applies the migration, while `downgrade()` reverts it. This allows rolling back problematic migrations in production without data loss. It provides a safety mechanism for schema changes.
+
+</details>
+
+### 3.7 Apply Migrations
+
+Apply all pending migrations:
+
+```bash
+alembic upgrade head
+```
+
+Check migration status:
+
+```bash
+alembic current
+```
+
+View migration history:
+
+```bash
+alembic history
+```
+
+### 3.8 Experiment: Add a New Column
+
+Modify `app/main.py` to add a `price` column to the Item model:
+
+```python
+class Item(Base):
+    __tablename__ = "items"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    description = Column(String)
+    price = Column(Integer, default=0)  # New column
+    created_at = Column(DateTime, default=datetime.utcnow)
+```
+
+Generate a new migration:
+
+```bash
+alembic revision --autogenerate -m "Add price column to items"
+```
+
+Review the generated migration file, then apply it:
+
+```bash
+alembic upgrade head
+```
+
+Verify the column was added by querying the database.
+
+### 3.9 Checkpoint
+
+**Self-Assessment:**
+- [ ] Alembic is initialized and configured
+- [ ] Initial migration creates the items table
+- [ ] You can generate new migrations with `--autogenerate`
+- [ ] You can apply migrations with `upgrade head`
+- [ ] You understand the difference between `upgrade()` and `downgrade()`
+- [ ] You can explain why migrations are better than manual SQL scripts
+
+## Chapter 4: Integrating Machine Learning Models
 
 Production ML systems require more than just training models—they need reliable serving infrastructure. A model that works perfectly in a Jupyter notebook becomes valuable only when it can receive requests, make predictions, and return results at scale.
 
-### 3.1 What You Will Build
+### 4.1 What You Will Build
 
 A sentiment analysis model integrated into the FastAPI application with endpoints for predictions and model information.
 
@@ -811,7 +1031,7 @@ curl -X POST http://localhost:8000/predict \
 - [ ] Root endpoint shows ML model status
 - [ ] You understand why models are loaded at startup
 
-## Chapter 4: Containerization with Docker
+## Chapter 5: Containerization with Docker
 
 Containers solve the "works on my machine" problem. By packaging the application with its dependencies, containers ensure consistent behavior across development, testing, and production environments.
 
@@ -1090,7 +1310,7 @@ curl -X POST http://localhost:8000/predict \
 All commands should succeed without errors.
 
 
-## Chapter 5: Monitoring with Prometheus and Grafana
+## Chapter 6: Monitoring with Prometheus and Grafana
 
 Production systems require observability. Prometheus collects metrics and Grafana visualizes them.
 
@@ -1155,7 +1375,7 @@ docker compose up -d
 - [ ] Prometheus scrapes metrics
 - [ ] Grafana connects to Prometheus
 
-## Chapter 6: Infrastructure as Code with Pulumi
+## Chapter 7: Infrastructure as Code with Pulumi
 
 Manual infrastructure provisioning is error-prone. Pulumi treats infrastructure as code.
 
@@ -1472,7 +1692,7 @@ pulumi stack output ecr_repository_url
 - [ ] You can access EC2 instance
 - [ ] ECR repository is created
 
-## Chapter 7: EC2 Deployment
+## Chapter 8: EC2 Deployment
 
 Deploy the Docker container to EC2 using the infrastructure created by Pulumi.
 
@@ -1519,7 +1739,7 @@ curl -X POST http://$EC2_IP/predict \\
 - [ ] Container running on EC2
 - [ ] Application accessible via public IP
 
-## Chapter 8: CI/CD with GitHub Actions
+## Chapter 9: CI/CD with GitHub Actions
 
 Automated pipelines test code and deploy to AWS automatically.
 
