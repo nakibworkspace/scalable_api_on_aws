@@ -4,7 +4,9 @@ import pulumi_aws as aws
 # Configuration
 config = pulumi.Config()
 app_name = "fastapi-app"
-database_url = config.get("database_url") or "postgresql://postgres:postgres@localhost:5432/postgres"
+database_url = config.require("database_url")  # Must be set via: pulumi config set database_url <value>
+docker_image = config.require("docker_image")  # Must be set via: pulumi config set docker_image <value>
+ssh_public_key = config.get("ssh_public_key")  # Optional: your public SSH key for EC2 access
 
 # 1. VPC
 vpc = aws.ec2.Vpc(
@@ -90,48 +92,54 @@ security_group = aws.ec2.SecurityGroup(
     tags={"Name": f"{app_name}-sg"},
 )
 
-# 3. User Data Script - simplified without ECR
-user_data = f"""#!/bin/bash
+# 3. SSH Key Pair (if public key provided)
+key_pair = None
+if ssh_public_key:
+    key_pair = aws.ec2.KeyPair(
+        f"{app_name}-keypair",
+        public_key=ssh_public_key,
+        tags={"Name": f"{app_name}-keypair"},
+    )
+
+# 4. User Data Script - using Docker Hub
+user_data = pulumi.Output.all(docker_image, database_url).apply(
+    lambda args: f"""#!/bin/bash
 set -e
 
 # Install Docker
 yum update -y
-yum install -y docker git
+yum install -y docker
 systemctl start docker
 systemctl enable docker
 usermod -a -G docker ec2-user
 
-# Install Docker Compose
-curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
+# Pull image from Docker Hub
+echo "Pulling Docker image from Docker Hub: {args[0]}"
+docker pull {args[0]}
 
-# Clone your repo and run with docker-compose
-# Note: You'll need to manually deploy or use GitHub Actions
-echo "Docker installed. Ready for deployment."
-echo "DATABASE_URL={database_url}" > /home/ec2-user/.env
+# Stop and remove old container if exists
+docker stop fastapi-app || true
+docker rm fastapi-app || true
 
-# Create a simple deployment script
-cat > /home/ec2-user/deploy.sh << 'EOF'
-#!/bin/bash
-cd /home/ec2-user/app
-git pull
-docker-compose down
-docker-compose up -d --build
-EOF
+# Run the container
+docker run -d --name fastapi-app --restart unless-stopped \
+  -p 80:8000 \
+  -e DATABASE_URL="{args[1]}" \
+  {args[0]}
 
-chmod +x /home/ec2-user/deploy.sh
-chown ec2-user:ec2-user /home/ec2-user/deploy.sh
-
-echo "Deployment complete! SSH in and run ./deploy.sh after cloning your repo"
+echo "Deployment complete!"
+echo "Application running at http://$(curl -s http://169.254.169.254/latest/meta-data/public-hostname)"
 """
+)
 
-# 4. EC2 Instance
+# 5. EC2 Instance
 instance = aws.ec2.Instance(
     f"{app_name}-instance",
     instance_type="t3.small",
     ami="ami-01811d4912b4ccb26",  # Amazon Linux 2023 in ap-southeast-1
     subnet_id=public_subnet.id,
     vpc_security_group_ids=[security_group.id],
+    key_name=key_pair.key_name if key_pair else None,
     user_data=user_data,
     tags={"Name": f"{app_name}-instance"},
 )
@@ -142,3 +150,4 @@ pulumi.export("instance_public_ip", instance.public_ip)
 pulumi.export("instance_public_dns", instance.public_dns)
 pulumi.export("application_url", instance.public_dns.apply(lambda dns: f"http://{dns}"))
 pulumi.export("ssh_command", instance.public_ip.apply(lambda ip: f"ssh ec2-user@{ip}"))
+pulumi.export("docker_image", docker_image)

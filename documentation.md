@@ -15,8 +15,8 @@ By the end of this lab, you will be able to:
 3. Integrate a machine learning model for sentiment analysis
 4. Load ML models efficiently using startup hooks
 5. Containerize the application using Docker
-6. Deploy infrastructure to AWS using Pulumi (EC2, ECR, VPC)
-7. Set up automated CI/CD pipelines with GitHub Actions
+6. Deploy infrastructure to AWS using Pulumi (EC2, VPC, Security Groups)
+7. Set up automated CI/CD pipelines with GitHub Actions and Docker Hub
 8. Test API endpoints and verify database operations
 
 **Prerequisites:** Basic Python knowledge, familiarity with REST APIs, and basic understanding of Docker concepts.
@@ -1109,7 +1109,7 @@ Run the container:
 
 ```bash
 docker run -d -p 8000:8000 \
-  -e DATABASE_URL=postgresql://postgres:postgres@your-db-host:5432/postgres \
+  -e DATABASE_URL=postgresql://postgres:postgres@100.84.15.166:5432/postgres \
   --name fastapi-container \
   fastapi-app
 ```
@@ -1386,7 +1386,6 @@ aws configure
 Generate and enter your AWS Access Key ID, Secret Key ID, and preferred region(`ap-southeast-1`)
 
 The configuration should look like this:
-
 
 
 ### 6.2: Install Pulumi (if not done before)
@@ -1690,52 +1689,65 @@ pulumi stack output ecr_repository_url
 **Self-Assessment:**
 - [ ] Pulumi deploys EC2 infrastructure
 - [ ] You can access EC2 instance
-- [ ] ECR repository is created
+- [ ] Docker Hub repository configured
 
 ## Chapter 8: EC2 Deployment
 
-Deploy the Docker container to EC2 using the infrastructure created by Pulumi.
+Deploy the Docker container to EC2 using Docker Hub for image storage.
 
-### 7.1 Push Image to ECR
+### 7.1 Push Image to Docker Hub
 
 ```bash
-# Get ECR URL
-ECR_URL=$(cd infra && pulumi stack output ecr_repository_url)
+# Login to Docker Hub
+docker login
 
-# Login to ECR
-aws ecr get-login-password --region ap-southeast-1 | \\
-  docker login --username AWS --password-stdin $(echo $ECR_URL | cut -d'/' -f1)
+# Tag image with your Docker Hub username
+docker tag fastapi-app:latest your-dockerhub-username/fastapi-app:latest
 
-# Tag and push
-docker tag fastapi-app:latest $ECR_URL:latest
-docker push $ECR_URL:latest
+# Push to Docker Hub
+docker push your-dockerhub-username/fastapi-app:latest
 ```
 
-### 7.2 Deploy to EC2
+### 7.2 Configure Pulumi for Docker Hub
+
+Set the Docker image in Pulumi config:
+
+```bash
+cd infra
+pulumi config set docker_image your-dockerhub-username/fastapi-app:latest
+pulumi config set database_url "postgresql://user:pass@host:5432/db" --secret
+```
+
+### 7.3 Deploy to EC2
 
 The EC2 instance automatically:
 1. Installs Docker
-2. Installs AWS CLI
-3. Logs into ECR
-4. Pulls the latest image
-5. Runs the container on port 80
+2. Pulls the latest image from Docker Hub
+3. Runs the container on port 80 with environment variables
 
-### 7.3 Test Deployment
+Deploy or update infrastructure:
+
+```bash
+pulumi up --yes
+```
+
+### 7.4 Test Deployment
 
 ```bash
 # Get EC2 public IP
-EC2_IP=$(cd infra && pulumi stack output instance_public_ip)
+EC2_IP=$(pulumi stack output instance_public_ip -C infra)
 
 # Test endpoints
 curl http://$EC2_IP/health
 curl http://$EC2_IP/model/info
-curl -X POST http://$EC2_IP/predict \\
-  -H "Content-Type: application/json" \\
+curl -X POST http://$EC2_IP/predict \
+  -H "Content-Type: application/json" \
   -d '{"text": "This is amazing!"}'
 ```
 
 **Self-Assessment:**
-- [ ] Image pushed to ECR
+- [ ] Image pushed to Docker Hub
+- [ ] Pulumi configured with Docker Hub image
 - [ ] Container running on EC2
 - [ ] Application accessible via public IP
 
