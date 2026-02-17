@@ -92,26 +92,25 @@ security_group = aws.ec2.SecurityGroup(
     tags={"Name": f"{app_name}-sg"},
 )
 
-# 3. SSH Key Pair (if public key provided)
-key_pair = None
-if ssh_public_key:
-    key_pair = aws.ec2.KeyPair(
-        f"{app_name}-keypair",
-        public_key=ssh_public_key,
-        tags={"Name": f"{app_name}-keypair"},
-    )
+# 3. Use existing AWS Key Pair
+# Note: Key pair must be created in AWS first with:
+# aws ec2 create-key-pair --key-name fastapi-ec2-key --region ap-southeast-1 --query 'KeyMaterial' --output text > fastapi-ec2-key.pem
 
-# 4. User Data Script - using Docker Hub
+# 4. User Data Script - using Docker Hub (Ubuntu)
 user_data = pulumi.Output.all(docker_image, database_url).apply(
     lambda args: f"""#!/bin/bash
 set -e
 
-# Install Docker
-yum update -y
-yum install -y docker
+# Update and install Docker
+apt-get update
+apt-get install -y docker.io
+
+# Start Docker
 systemctl start docker
 systemctl enable docker
-usermod -a -G docker ec2-user
+
+# Add ubuntu user to docker group
+usermod -aG docker ubuntu
 
 # Pull image from Docker Hub
 echo "Pulling Docker image from Docker Hub: {args[0]}"
@@ -128,7 +127,6 @@ docker run -d --name fastapi-app --restart unless-stopped \
   {args[0]}
 
 echo "Deployment complete!"
-echo "Application running at http://$(curl -s http://169.254.169.254/latest/meta-data/public-hostname)"
 """
 )
 
@@ -139,7 +137,7 @@ instance = aws.ec2.Instance(
     ami="ami-01811d4912b4ccb26",  # Amazon Linux 2023 in ap-southeast-1
     subnet_id=public_subnet.id,
     vpc_security_group_ids=[security_group.id],
-    key_name=key_pair.key_name if key_pair else None,
+    key_name="fastapi-ec2-key",  # Use the AWS key pair name
     user_data=user_data,
     tags={"Name": f"{app_name}-instance"},
 )

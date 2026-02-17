@@ -33,6 +33,11 @@ htmlcov/
 .env
 .env.local
 
+# SSH Keys
+ec2-key
+ec2-key.pub
+*.pem
+
 # IDEs
 .vscode/
 .idea/

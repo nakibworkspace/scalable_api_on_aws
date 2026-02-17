@@ -1,6 +1,9 @@
 from fastapi.testclient import TestClient
-from app.main import app
+from app.main import app, Base, engine
 import pytest
+
+# Create tables before tests
+Base.metadata.create_all(bind=engine)
 
 client = TestClient(app)
 
